@@ -494,6 +494,7 @@ export const ReportsPage: React.FC = () => {
   const scopedPayments = useMemo(() => {
     return feePayments
       .filter((p) => {
+        if (p.isVoided) return false;
         if (p.session !== selectedSession) return false;
         if (selectedTerm !== 'All' && p.term !== selectedTerm) return false;
         if (selectedClassFilter !== 'All' && p.className !== selectedClassFilter) return false;

@@ -1,4 +1,4 @@
-export type UserRole = 'director' | 'principal' | 'head_teacher' | 'teacher' | 'parent';
+export type UserRole = 'director' | 'principal' | 'bursar' | 'head_teacher' | 'teacher' | 'parent';
 
 export type HeadTeacherTitle = 'Headmaster' | 'Headmistress';
 
@@ -362,6 +362,82 @@ export interface FeePayment {
   recordedBy: string;
   recordedByUid: string;
   createdAt: string;
+  isEdited?: boolean;
+  editedAt?: string;
+  editedBy?: string;
+  editReason?: string;
+  isVoided?: boolean;
+  voidedAt?: string;
+  voidedBy?: string;
+  voidedByUid?: string;
+  voidReason?: string;
+}
+
+export interface FeeDeletionLog {
+  id: string;
+  deletionType: 'payment' | 'fee_item';
+  studentId: string;
+  studentName: string;
+  admissionNo: string;
+  className: string;
+  session: string;
+  term: AcademicTerm;
+  studentFeeId: string;
+  categoryId: string;
+  categoryName: string;
+  paymentId?: string;
+  receiptNo: string;
+  amount: number;
+  expectedAmount?: number;
+  paidAmount?: number;
+  paymentMethod?: ManualPaymentMethod;
+  paymentDate?: string;
+  reason: string;
+  deletedBy: string;
+  deletedByUid: string;
+  deletedAt: string;
+}
+
+export type FeeAuditActionType =
+  | 'edit_payment'
+  | 'edit_expected_amount'
+  | 'edit_due_date'
+  | 'void_payment'
+  | 'delete_fee_item';
+
+export interface FeeAuditValueSnapshot {
+  expectedAmount?: number;
+  paidAmount?: number;
+  balance?: number;
+  status?: string;
+  dueDate?: string;
+  amount?: number;
+  paymentDate?: string;
+  paymentMethod?: ManualPaymentMethod;
+  notes?: string;
+  receiptNo?: string;
+}
+
+export interface FeeAuditLog {
+  id: string;
+  actionType: FeeAuditActionType;
+  studentId: string;
+  studentName: string;
+  admissionNo: string;
+  className: string;
+  session: string;
+  term: AcademicTerm;
+  studentFeeId: string;
+  categoryId: string;
+  categoryName: string;
+  paymentId?: string;
+  receiptNo: string;
+  reason: string;
+  oldValues: FeeAuditValueSnapshot;
+  newValues: FeeAuditValueSnapshot;
+  performedBy: string;
+  performedByUid: string;
+  performedAt: string;
 }
 
 export interface TimetableSlot {

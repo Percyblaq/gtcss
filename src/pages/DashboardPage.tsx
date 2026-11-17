@@ -157,7 +157,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       setTeachers([]);
     }
 
-    if (role === 'director' || role === 'principal') {
+    if (role === 'director' || role === 'principal' || role === 'bursar') {
       unsubs.push(
         subscribeStudentFees(role, currentUser, firebaseUser.email, setStudentFees, handleErr)
       );
@@ -468,7 +468,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const recentActivities = useMemo(() => {
     const items: ActivityEntry[] = [];
 
-    if (role === 'director' || role === 'principal') {
+    if (role === 'director' || role === 'principal' || role === 'bursar') {
       feePayments.slice(0, 4).forEach((p) => {
         items.push({
           id: `act-pay-${p.id}`,
@@ -874,6 +874,90 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                 </div>
               )}
             </div>
+          </div>
+        </>
+      )}
+
+      {/* ==================== BURSAR DASHBOARD ==================== */}
+      {role === 'bursar' && (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            <div className="bg-white rounded-[10px] p-5 border border-[#E6DFD3] border-t-2 border-t-[#B8913A] shadow-[0_1px_2px_rgba(42,42,46,0.04),0_6px_16px_rgba(42,42,46,0.04)]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-[#6E6A63]">Active Students</span>
+                <Users className="w-4 h-4 text-[#6B1020]/75 shrink-0" />
+              </div>
+              <div className="mt-3">
+                <div className="text-2xl sm:text-3xl font-semibold tracking-tight text-[#2A2A2E] tabular-nums">
+                  {activeStudents.length}
+                </div>
+                <p className="text-xs text-[#6E6A63] mt-1.5">
+                  Across {activeClassesList.length} active classes
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-[10px] p-5 border border-[#E6DFD3] border-t-2 border-t-[#B8913A] shadow-[0_1px_2px_rgba(42,42,46,0.04),0_6px_16px_rgba(42,42,46,0.04)]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-[#6E6A63]">Total Expected (₦)</span>
+                <FileText className="w-4 h-4 text-[#6B1020]/75 shrink-0" />
+              </div>
+              <div className="mt-3">
+                <div className="text-2xl sm:text-3xl font-semibold tracking-tight text-[#2A2A2E] tabular-nums">
+                  {formatNaira(feeSummary.expected)}
+                </div>
+                <p className="text-xs text-[#6E6A63] mt-1.5">
+                  {reconciledFees.length} billed fee item(s)
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-[10px] p-5 border border-[#E6DFD3] border-t-2 border-t-[#B8913A] shadow-[0_1px_2px_rgba(42,42,46,0.04),0_6px_16px_rgba(42,42,46,0.04)]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-[#6E6A63]">Fee Collection (₦)</span>
+                <Receipt className="w-4 h-4 text-[#6B1020]/75 shrink-0" />
+              </div>
+              <div className="mt-3">
+                <div className="text-2xl sm:text-3xl font-semibold tracking-tight text-[#2A583B] tabular-nums">
+                  {formatNaira(feeSummary.collected)}
+                </div>
+                <p className="text-xs text-[#2A583B] font-medium mt-1.5">
+                  {feeSummary.rate}% recovery rate
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-[10px] p-5 border border-[#E6DFD3] border-t-2 border-t-[#B8913A] shadow-[0_1px_2px_rgba(42,42,46,0.04),0_6px_16px_rgba(42,42,46,0.04)]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-[#6E6A63]">Outstanding Balances</span>
+                <AlertCircle className="w-4 h-4 text-[#6B1020]/75 shrink-0" />
+              </div>
+              <div className="mt-3">
+                <div className="text-2xl sm:text-3xl font-semibold tracking-tight text-[#6B1020] tabular-nums">
+                  {formatNaira(feeSummary.outstanding)}
+                </div>
+                <p className="text-xs text-[#6E6A63] mt-1.5">
+                  {feeSummary.unpaidItems} pending/partial fee item(s)
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-[10px] border border-[#E6DFD3] p-6 shadow-[0_1px_2px_rgba(42,42,46,0.04),0_6px_16px_rgba(42,42,46,0.04)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="font-semibold text-sm text-[#2A2A2E]">Bursary & Fee Operations</h2>
+              <p className="text-xs text-[#6E6A63] mt-1">
+                Record installment or full fee payments, inspect student running statements, and print official receipts.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate('fees')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-[8px] bg-[#6B1020] hover:bg-[#540C19] text-white text-xs font-medium shadow-xs transition-colors duration-150 shrink-0"
+            >
+              <Receipt className="w-4 h-4 text-[#E3CFA6]" />
+              Open School Fees & Payments
+            </button>
           </div>
         </>
       )}

@@ -47,7 +47,7 @@ export function subscribeAnnouncements(
   let targetQuery;
   if (role === 'director' || role === 'principal') {
     targetQuery = colRef;
-  } else if (role === 'teacher' || role === 'head_teacher') {
+  } else if (role === 'teacher' || role === 'head_teacher' || role === 'bursar') {
     targetQuery = query(
       colRef,
       where('status', '==', 'Published'),

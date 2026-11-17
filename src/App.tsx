@@ -19,16 +19,16 @@ import { SchoolLogo } from './components/common/SchoolLogo';
 
 // Route permissions map
 const PAGE_PERMISSIONS: Record<string, UserRole[]> = {
-  dashboard: ['director', 'principal', 'head_teacher', 'teacher', 'parent'],
-  students: ['director', 'principal', 'head_teacher', 'teacher', 'parent'],
+  dashboard: ['director', 'principal', 'bursar', 'head_teacher', 'teacher', 'parent'],
+  students: ['director', 'principal', 'bursar', 'head_teacher', 'teacher', 'parent'],
   teachers: ['director', 'principal', 'head_teacher', 'teacher'],
-  classes: ['director', 'principal', 'head_teacher', 'teacher'],
+  classes: ['director', 'principal', 'bursar', 'head_teacher', 'teacher'],
   attendance: ['director', 'principal', 'head_teacher', 'teacher', 'parent'],
   academics: ['director', 'principal', 'head_teacher', 'teacher', 'parent'],
-  fees: ['director', 'principal', 'parent'], // Teachers & Head Teacher cannot access financial bursary
+  fees: ['director', 'principal', 'bursar', 'parent'], // Teachers & Head Teacher cannot access financial bursary
   timetable: ['director', 'principal', 'head_teacher', 'teacher', 'parent'],
   reports: ['director', 'principal', 'head_teacher', 'teacher', 'parent'],
-  announcements: ['director', 'principal', 'head_teacher', 'teacher', 'parent'],
+  announcements: ['director', 'principal', 'bursar', 'head_teacher', 'teacher', 'parent'],
   settings: ['director', 'principal'], // Scoped to School Administration
 };
 

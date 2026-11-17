@@ -16,7 +16,9 @@ import { handleFirestoreError, OperationType } from '../firebase/errorHandler';
 import { fitDimensionsInsideBox, loadImageForPdf } from './brandingService';
 import {
   AcademicTerm,
+  FeeAuditLog,
   FeeCategory,
+  FeeDeletionLog,
   FeePayment,
   FeeScheduleItem,
   ManualPaymentMethod,
@@ -58,6 +60,54 @@ export function formatNaira(amount: number): string {
 export function formatPdfNaira(amount: number): string {
   const num = Number.isFinite(amount) ? amount : 0;
   return 'NGN ' + Math.round(num).toLocaleString('en-NG');
+}
+
+export function getTodayYmd(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function isFeeOverdue(fee: Pick<StudentFee, 'balance' | 'dueDate'>, todayYmd = getTodayYmd()): boolean {
+  const due = (fee.dueDate || '').trim();
+  return fee.balance > 0 && due.length >= 8 && todayYmd > due;
+}
+
+export interface InstallmentHistoryEntry {
+  payment: FeePayment;
+  installmentNumber: number | null;
+  cumulativePaidAfter: number;
+  runningBalanceAfter: number;
+}
+
+export function computeInstallmentHistoryForFee(
+  fee: Pick<StudentFee, 'amountDue'>,
+  paymentsForFee: FeePayment[]
+): InstallmentHistoryEntry[] {
+  const sorted = [...paymentsForFee].sort(
+    (a, b) =>
+      (a.paymentDate || '').localeCompare(b.paymentDate || '') ||
+      (a.createdAt || '').localeCompare(b.createdAt || '') ||
+      a.id.localeCompare(b.id)
+  );
+
+  let cumulative = 0;
+  let seq = 0;
+  return sorted.map((p) => {
+    const isActive = !p.isVoided && p.amount > 0;
+    if (isActive) {
+      seq += 1;
+      cumulative += p.amount;
+    }
+    return {
+      payment: p,
+      installmentNumber: isActive ? seq : null,
+      cumulativePaidAfter: cumulative,
+      runningBalanceAfter: Math.max(0, fee.amountDue - cumulative),
+    };
+  });
 }
 
 export function buildFeeScheduleId(
@@ -301,6 +351,60 @@ export function subscribeFeePayments(
   );
 }
 
+export function subscribeFeeDeletionLogs(
+  role: UserRole,
+  onData: (logs: FeeDeletionLog[]) => void,
+  onError: (msg: string) => void
+): Unsubscribe {
+  if (role !== 'director') {
+    onData([]);
+    return () => {};
+  }
+
+  return onSnapshot(
+    collection(db, 'feeDeletionLogs'),
+    (snap) => {
+      const list = snap.docs.map((d) => ({ ...(d.data() as FeeDeletionLog), id: d.id }));
+      list.sort((a, b) => (b.deletedAt || '').localeCompare(a.deletedAt || ''));
+      onData(list);
+    },
+    (err) => {
+      try {
+        handleFirestoreError(err, OperationType.LIST, 'feeDeletionLogs');
+      } catch (w) {
+        onError(extractFriendlyError(w, 'Failed to load deleted fee audit entries.'));
+      }
+    }
+  );
+}
+
+export function subscribeFeeAuditLogs(
+  role: UserRole,
+  onData: (logs: FeeAuditLog[]) => void,
+  onError: (msg: string) => void
+): Unsubscribe {
+  if (role !== 'director') {
+    onData([]);
+    return () => {};
+  }
+
+  return onSnapshot(
+    collection(db, 'feeAuditLogs'),
+    (snap) => {
+      const list = snap.docs.map((d) => ({ ...(d.data() as FeeAuditLog), id: d.id }));
+      list.sort((a, b) => (b.performedAt || '').localeCompare(a.performedAt || ''));
+      onData(list);
+    },
+    (err) => {
+      try {
+        handleFirestoreError(err, OperationType.LIST, 'feeAuditLogs');
+      } catch (w) {
+        onError(extractFriendlyError(w, 'Failed to load fee edit & void audit logs.'));
+      }
+    }
+  );
+}
+
 // ==================== MUTATIONS ====================
 
 export async function seedDefaultFeeCategoriesToFirestore(): Promise<void> {
@@ -532,6 +636,771 @@ export async function deleteUnpaidStudentFeeFromFirestore(fee: StudentFee): Prom
   }
 }
 
+export async function deleteSingleFeePaymentWithAuditInFirestore(params: {
+  studentFee: StudentFee;
+  payment: FeePayment;
+  student?: Student;
+  allStudentFeesForStudent: StudentFee[];
+  existingPayments: FeePayment[];
+  reason: string;
+  deletedBy: string;
+  deletedByUid: string;
+}): Promise<{ updatedFee: StudentFee; log: FeeDeletionLog }> {
+  const {
+    studentFee,
+    payment,
+    student,
+    allStudentFeesForStudent,
+    existingPayments,
+    reason,
+    deletedBy,
+    deletedByUid,
+  } = params;
+
+  const trimmedReason = reason.trim().slice(0, 300);
+  if (!trimmedReason) {
+    throw new Error('Please enter a reason for deleting this payment.');
+  }
+
+  const remainingForFee = existingPayments.filter(
+    (p) => p.studentFeeId === studentFee.id && p.id !== payment.id
+  );
+  const newTotalPaid = Math.min(
+    studentFee.amountDue,
+    remainingForFee.reduce((sum, p) => sum + (p.amount > 0 ? p.amount : 0), 0)
+  );
+  const newBalance = Math.max(0, studentFee.amountDue - newTotalPaid);
+  const newStatus: StudentFee['status'] =
+    newTotalPaid <= 0 ? 'Pending' : newBalance === 0 ? 'Paid' : 'Partial';
+
+  const now = new Date().toISOString();
+  const logId = `fdel_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+
+  const logEntry: FeeDeletionLog = {
+    id: logId,
+    deletionType: 'payment',
+    studentId: studentFee.studentId,
+    studentName: studentFee.studentName,
+    admissionNo: studentFee.admissionNo,
+    className: studentFee.className,
+    session: studentFee.session,
+    term: studentFee.term,
+    studentFeeId: studentFee.id,
+    categoryId: studentFee.categoryId,
+    categoryName: studentFee.categoryName,
+    paymentId: payment.id,
+    receiptNo: payment.receiptNo,
+    amount: payment.amount,
+    expectedAmount: studentFee.amountDue,
+    paidAmount: newTotalPaid,
+    paymentMethod: payment.paymentMethod,
+    paymentDate: payment.paymentDate,
+    reason: trimmedReason,
+    deletedBy: (deletedBy || 'School Director').slice(0, 120),
+    deletedByUid,
+    deletedAt: now,
+  };
+
+  const batch = writeBatch(db);
+  batch.delete(doc(db, 'feePayments', payment.id));
+  batch.update(doc(db, 'studentFees', studentFee.id), {
+    amountPaid: newTotalPaid,
+    balance: newBalance,
+    status: newStatus,
+    updatedAt: now,
+  });
+
+  if (student) {
+    const otherFees = allStudentFeesForStudent.filter((f) => f.id !== studentFee.id);
+    const totalDueAll =
+      studentFee.amountDue + otherFees.reduce((s, f) => s + f.amountDue, 0);
+    const totalPaidAll =
+      newTotalPaid +
+      otherFees.reduce((s, f) => {
+        const pSum = existingPayments
+          .filter((p) => p.studentFeeId === f.id && p.id !== payment.id)
+          .reduce((acc, p) => acc + p.amount, 0);
+        return s + pSum;
+      }, 0);
+
+    const overallStatus: Student['feeStatus'] =
+      totalPaidAll <= 0
+        ? 'Pending'
+        : totalPaidAll >= totalDueAll
+        ? 'Paid'
+        : 'Partial';
+
+    batch.update(doc(db, 'students', student.id), {
+      feeStatus: overallStatus,
+      updatedAt: now,
+    });
+  }
+
+  batch.set(doc(db, 'feeDeletionLogs', logId), stripUndefined(logEntry));
+
+  try {
+    await batch.commit();
+    return {
+      updatedFee: {
+        ...studentFee,
+        amountPaid: newTotalPaid,
+        balance: newBalance,
+        status: newStatus,
+        updatedAt: now,
+      },
+      log: logEntry,
+    };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `feePayments/${payment.id}`);
+  }
+}
+
+export async function deleteStudentFeeItemWithAuditInFirestore(params: {
+  studentFee: StudentFee;
+  student?: Student;
+  allStudentFeesForStudent: StudentFee[];
+  existingPayments: FeePayment[];
+  reason: string;
+  deletedBy: string;
+  deletedByUid: string;
+}): Promise<{ deletedPaymentsCount: number; log: FeeAuditLog }> {
+  const {
+    studentFee,
+    student,
+    allStudentFeesForStudent,
+    existingPayments,
+    reason,
+    deletedBy,
+    deletedByUid,
+  } = params;
+
+  const trimmedReason = reason.trim().slice(0, 300);
+  if (!trimmedReason) {
+    throw new Error('Please enter a reason for deleting this fee item.');
+  }
+
+  const activePayments = existingPayments.filter(
+    (p) => p.studentFeeId === studentFee.id && !p.isVoided
+  );
+  if (activePayments.length > 0) {
+    throw new Error(
+      'Cannot delete this fee item because it has active recorded payments. Void all active payments first.'
+    );
+  }
+
+  const voidedPaymentsForFee = existingPayments.filter(
+    (p) => p.studentFeeId === studentFee.id && p.isVoided
+  );
+  const rawReceipts = voidedPaymentsForFee.map((p) => `${p.receiptNo} (Voided)`).join(', ');
+  const receiptNoSummary =
+    rawReceipts.length === 0
+      ? 'No Active Payments'
+      : rawReceipts.length > 480
+      ? `${rawReceipts.slice(0, 477)}...`
+      : rawReceipts;
+
+  const now = new Date().toISOString();
+  const logId = `faud_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+  const actorName = (deletedBy || 'School Director').slice(0, 120);
+
+  const auditEntry: FeeAuditLog = {
+    id: logId,
+    actionType: 'delete_fee_item',
+    studentId: studentFee.studentId,
+    studentName: studentFee.studentName,
+    admissionNo: studentFee.admissionNo,
+    className: studentFee.className,
+    session: studentFee.session,
+    term: studentFee.term,
+    studentFeeId: studentFee.id,
+    categoryId: studentFee.categoryId,
+    categoryName: studentFee.categoryName,
+    receiptNo: receiptNoSummary,
+    reason: trimmedReason,
+    oldValues: {
+      expectedAmount: studentFee.amountDue,
+      paidAmount: studentFee.amountPaid,
+      balance: studentFee.balance,
+      status: studentFee.status,
+    },
+    newValues: {
+      expectedAmount: 0,
+      paidAmount: 0,
+      balance: 0,
+      status: 'Deleted',
+    },
+    performedBy: actorName,
+    performedByUid: deletedByUid,
+    performedAt: now,
+  };
+
+  const batch = writeBatch(db);
+  batch.delete(doc(db, 'studentFees', studentFee.id));
+
+  if (student) {
+    const remainingFees = allStudentFeesForStudent.filter((f) => f.id !== studentFee.id);
+    const totalDueAll = remainingFees.reduce((s, f) => s + f.amountDue, 0);
+    const totalPaidAll = remainingFees.reduce((s, f) => {
+      const pSum = existingPayments
+        .filter((p) => p.studentFeeId === f.id && !p.isVoided)
+        .reduce((acc, p) => acc + p.amount, 0);
+      return s + pSum;
+    }, 0);
+
+    const overallStatus: Student['feeStatus'] =
+      totalPaidAll <= 0
+        ? 'Pending'
+        : totalPaidAll >= totalDueAll
+        ? 'Paid'
+        : 'Partial';
+
+    batch.update(doc(db, 'students', student.id), {
+      feeStatus: overallStatus,
+      updatedAt: now,
+    });
+  }
+
+  batch.set(doc(db, 'feeAuditLogs', logId), stripUndefined(auditEntry));
+
+  try {
+    await batch.commit();
+    return {
+      deletedPaymentsCount: 0,
+      log: auditEntry,
+    };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `studentFees/${studentFee.id}`);
+  }
+}
+
+export async function editStudentFeeExpectedAmountWithAuditInFirestore(params: {
+  studentFee: StudentFee;
+  student?: Student;
+  allStudentFeesForStudent: StudentFee[];
+  existingPayments: FeePayment[];
+  newExpectedAmount: number;
+  reason: string;
+  editedBy: string;
+  editedByUid: string;
+}): Promise<{ updatedFee: StudentFee; log: FeeAuditLog }> {
+  const {
+    studentFee,
+    student,
+    allStudentFeesForStudent,
+    existingPayments,
+    newExpectedAmount,
+    reason,
+    editedBy,
+    editedByUid,
+  } = params;
+
+  const roundedExpected = Math.round(newExpectedAmount);
+  if (!Number.isFinite(roundedExpected) || roundedExpected <= 0) {
+    throw new Error('Expected amount must be a positive number greater than ₦0.');
+  }
+  const trimmedReason = reason.trim().slice(0, 300);
+  if (!trimmedReason) {
+    throw new Error('Please enter a reason for editing the expected amount.');
+  }
+
+  const activePaid = existingPayments
+    .filter((p) => p.studentFeeId === studentFee.id && !p.isVoided && p.amount > 0)
+    .reduce((sum, p) => sum + p.amount, 0);
+  const newBalance = Math.max(0, roundedExpected - activePaid);
+  const newStatus: StudentFee['status'] =
+    activePaid <= 0 ? 'Pending' : newBalance === 0 ? 'Paid' : 'Partial';
+
+  const now = new Date().toISOString();
+  const logId = `faud_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+  const actorName = (editedBy || 'School Director').slice(0, 120);
+
+  const auditEntry: FeeAuditLog = {
+    id: logId,
+    actionType: 'edit_expected_amount',
+    studentId: studentFee.studentId,
+    studentName: studentFee.studentName,
+    admissionNo: studentFee.admissionNo,
+    className: studentFee.className,
+    session: studentFee.session,
+    term: studentFee.term,
+    studentFeeId: studentFee.id,
+    categoryId: studentFee.categoryId,
+    categoryName: studentFee.categoryName,
+    receiptNo: 'Assigned Fee Item',
+    reason: trimmedReason,
+    oldValues: {
+      expectedAmount: studentFee.amountDue,
+      paidAmount: studentFee.amountPaid,
+      balance: studentFee.balance,
+      status: studentFee.status,
+    },
+    newValues: {
+      expectedAmount: roundedExpected,
+      paidAmount: activePaid,
+      balance: newBalance,
+      status: newStatus,
+    },
+    performedBy: actorName,
+    performedByUid: editedByUid,
+    performedAt: now,
+  };
+
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'studentFees', studentFee.id), {
+    amountDue: roundedExpected,
+    amountPaid: activePaid,
+    balance: newBalance,
+    status: newStatus,
+    updatedAt: now,
+  });
+
+  if (student) {
+    const otherFees = allStudentFeesForStudent.filter((f) => f.id !== studentFee.id);
+    const totalDueAll = roundedExpected + otherFees.reduce((s, f) => s + f.amountDue, 0);
+    const totalPaidAll =
+      activePaid +
+      otherFees.reduce((s, f) => {
+        const pSum = existingPayments
+          .filter((p) => p.studentFeeId === f.id && !p.isVoided && p.amount > 0)
+          .reduce((acc, p) => acc + p.amount, 0);
+        return s + pSum;
+      }, 0);
+
+    const overallStatus: Student['feeStatus'] =
+      totalPaidAll <= 0
+        ? 'Pending'
+        : totalPaidAll >= totalDueAll
+        ? 'Paid'
+        : 'Partial';
+
+    batch.update(doc(db, 'students', student.id), {
+      feeStatus: overallStatus,
+      updatedAt: now,
+    });
+  }
+
+  batch.set(doc(db, 'feeAuditLogs', logId), stripUndefined(auditEntry));
+
+  try {
+    await batch.commit();
+    return {
+      updatedFee: {
+        ...studentFee,
+        amountDue: roundedExpected,
+        amountPaid: activePaid,
+        balance: newBalance,
+        status: newStatus,
+        updatedAt: now,
+      },
+      log: auditEntry,
+    };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `studentFees/${studentFee.id}`);
+  }
+}
+
+export async function editStudentFeeDueDateWithAuditInFirestore(params: {
+  studentFee: StudentFee;
+  newDueDate: string;
+  reason: string;
+  editedBy: string;
+  editedByUid: string;
+}): Promise<{ updatedFee: StudentFee; log: FeeAuditLog }> {
+  const { studentFee, newDueDate, reason, editedBy, editedByUid } = params;
+
+  const trimmedDue = newDueDate.trim().slice(0, 20);
+  if (trimmedDue && !/^\d{4}-\d{2}-\d{2}$/.test(trimmedDue)) {
+    throw new Error('Please enter a valid due date (YYYY-MM-DD) or leave it blank.');
+  }
+  const trimmedReason = reason.trim().slice(0, 300);
+  if (!trimmedReason) {
+    throw new Error('Please enter a reason for updating the installment due date.');
+  }
+
+  const now = new Date().toISOString();
+  const logId = `faud_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+  const actorName = (editedBy || 'School Director').slice(0, 120);
+
+  const auditEntry: FeeAuditLog = {
+    id: logId,
+    actionType: 'edit_due_date',
+    studentId: studentFee.studentId,
+    studentName: studentFee.studentName,
+    admissionNo: studentFee.admissionNo,
+    className: studentFee.className,
+    session: studentFee.session,
+    term: studentFee.term,
+    studentFeeId: studentFee.id,
+    categoryId: studentFee.categoryId,
+    categoryName: studentFee.categoryName,
+    receiptNo: 'Assigned Fee Item',
+    reason: trimmedReason,
+    oldValues: {
+      dueDate: studentFee.dueDate || 'Not set',
+      balance: studentFee.balance,
+      status: studentFee.status,
+    },
+    newValues: {
+      dueDate: trimmedDue || 'Cleared (None)',
+      balance: studentFee.balance,
+      status: studentFee.status,
+    },
+    performedBy: actorName,
+    performedByUid: editedByUid,
+    performedAt: now,
+  };
+
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'studentFees', studentFee.id), {
+    dueDate: trimmedDue,
+    updatedAt: now,
+  });
+  batch.set(doc(db, 'feeAuditLogs', logId), stripUndefined(auditEntry));
+
+  try {
+    await batch.commit();
+    return {
+      updatedFee: {
+        ...studentFee,
+        dueDate: trimmedDue,
+        updatedAt: now,
+      },
+      log: auditEntry,
+    };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `studentFees/${studentFee.id}`);
+  }
+}
+
+export async function editFeePaymentWithAuditInFirestore(params: {
+  studentFee: StudentFee;
+  payment: FeePayment;
+  student?: Student;
+  allStudentFeesForStudent: StudentFee[];
+  existingPayments: FeePayment[];
+  amount: number;
+  paymentDate: string;
+  paymentMethod: ManualPaymentMethod;
+  notes: string;
+  reason: string;
+  editedBy: string;
+  editedByUid: string;
+}): Promise<{ updatedPayment: FeePayment; updatedFee: StudentFee; log: FeeAuditLog }> {
+  const {
+    studentFee,
+    payment,
+    student,
+    allStudentFeesForStudent,
+    existingPayments,
+    amount,
+    paymentDate,
+    paymentMethod,
+    notes,
+    reason,
+    editedBy,
+    editedByUid,
+  } = params;
+
+  if (payment.isVoided) {
+    throw new Error('Voided payments cannot be edited.');
+  }
+
+  const roundedAmount = Math.round(amount);
+  if (!Number.isFinite(roundedAmount) || roundedAmount <= 0) {
+    throw new Error('Payment amount must be a positive number greater than ₦0.');
+  }
+  if (!paymentDate || paymentDate.length !== 10) {
+    throw new Error('Please provide a valid payment date (YYYY-MM-DD).');
+  }
+  const trimmedReason = reason.trim().slice(0, 300);
+  if (!trimmedReason) {
+    throw new Error('Please enter a reason for editing this payment.');
+  }
+  const trimmedNotes = notes.trim().slice(0, 300);
+
+  const otherActivePaid = existingPayments
+    .filter(
+      (p) =>
+        p.studentFeeId === studentFee.id &&
+        p.id !== payment.id &&
+        !p.isVoided &&
+        p.amount > 0
+    )
+    .reduce((sum, p) => sum + p.amount, 0);
+
+  const newTotalPaid = otherActivePaid + roundedAmount;
+  const newBalance = Math.max(0, studentFee.amountDue - newTotalPaid);
+  const newStatus: StudentFee['status'] =
+    newTotalPaid <= 0 ? 'Pending' : newBalance === 0 ? 'Paid' : 'Partial';
+
+  const now = new Date().toISOString();
+  const logId = `faud_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+  const actorName = (editedBy || 'School Director').slice(0, 120);
+
+  const auditEntry: FeeAuditLog = {
+    id: logId,
+    actionType: 'edit_payment',
+    studentId: studentFee.studentId,
+    studentName: studentFee.studentName,
+    admissionNo: studentFee.admissionNo,
+    className: studentFee.className,
+    session: studentFee.session,
+    term: studentFee.term,
+    studentFeeId: studentFee.id,
+    categoryId: studentFee.categoryId,
+    categoryName: studentFee.categoryName,
+    paymentId: payment.id,
+    receiptNo: payment.receiptNo,
+    reason: trimmedReason,
+    oldValues: {
+      amount: payment.amount,
+      paymentDate: payment.paymentDate,
+      paymentMethod: payment.paymentMethod,
+      notes: payment.notes || '',
+      paidAmount: studentFee.amountPaid,
+      balance: studentFee.balance,
+      status: studentFee.status,
+    },
+    newValues: {
+      amount: roundedAmount,
+      paymentDate,
+      paymentMethod,
+      notes: trimmedNotes,
+      paidAmount: newTotalPaid,
+      balance: newBalance,
+      status: newStatus,
+    },
+    performedBy: actorName,
+    performedByUid: editedByUid,
+    performedAt: now,
+  };
+
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'feePayments', payment.id), {
+    amount: roundedAmount,
+    paymentDate,
+    paymentMethod,
+    notes: trimmedNotes,
+    isEdited: true,
+    editedAt: now,
+    editedBy: actorName,
+    editReason: trimmedReason,
+  });
+
+  batch.update(doc(db, 'studentFees', studentFee.id), {
+    amountPaid: newTotalPaid,
+    balance: newBalance,
+    status: newStatus,
+    updatedAt: now,
+  });
+
+  if (student) {
+    const otherFees = allStudentFeesForStudent.filter((f) => f.id !== studentFee.id);
+    const totalDueAll =
+      studentFee.amountDue + otherFees.reduce((s, f) => s + f.amountDue, 0);
+    const totalPaidAll =
+      newTotalPaid +
+      otherFees.reduce((s, f) => {
+        const pSum = existingPayments
+          .filter((p) => p.studentFeeId === f.id && !p.isVoided && p.amount > 0)
+          .reduce((acc, p) => acc + p.amount, 0);
+        return s + pSum;
+      }, 0);
+
+    const overallStatus: Student['feeStatus'] =
+      totalPaidAll <= 0
+        ? 'Pending'
+        : totalPaidAll >= totalDueAll
+        ? 'Paid'
+        : 'Partial';
+
+    batch.update(doc(db, 'students', student.id), {
+      feeStatus: overallStatus,
+      updatedAt: now,
+    });
+  }
+
+  batch.set(doc(db, 'feeAuditLogs', logId), stripUndefined(auditEntry));
+
+  try {
+    await batch.commit();
+    return {
+      updatedPayment: {
+        ...payment,
+        amount: roundedAmount,
+        paymentDate,
+        paymentMethod,
+        notes: trimmedNotes,
+        isEdited: true,
+        editedAt: now,
+        editedBy: actorName,
+        editReason: trimmedReason,
+      },
+      updatedFee: {
+        ...studentFee,
+        amountPaid: newTotalPaid,
+        balance: newBalance,
+        status: newStatus,
+        updatedAt: now,
+      },
+      log: auditEntry,
+    };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `feePayments/${payment.id}`);
+  }
+}
+
+export async function voidFeePaymentWithAuditInFirestore(params: {
+  studentFee: StudentFee;
+  payment: FeePayment;
+  student?: Student;
+  allStudentFeesForStudent: StudentFee[];
+  existingPayments: FeePayment[];
+  reason: string;
+  voidedBy: string;
+  voidedByUid: string;
+}): Promise<{ updatedPayment: FeePayment; updatedFee: StudentFee; log: FeeAuditLog }> {
+  const {
+    studentFee,
+    payment,
+    student,
+    allStudentFeesForStudent,
+    existingPayments,
+    reason,
+    voidedBy,
+    voidedByUid,
+  } = params;
+
+  if (payment.isVoided) {
+    throw new Error('This payment has already been voided.');
+  }
+
+  const trimmedReason = reason.trim().slice(0, 300);
+  if (!trimmedReason) {
+    throw new Error('Please enter a reason for voiding this payment.');
+  }
+
+  const remainingActivePaid = existingPayments
+    .filter(
+      (p) =>
+        p.studentFeeId === studentFee.id &&
+        p.id !== payment.id &&
+        !p.isVoided &&
+        p.amount > 0
+    )
+    .reduce((sum, p) => sum + p.amount, 0);
+
+  const newBalance = Math.max(0, studentFee.amountDue - remainingActivePaid);
+  const newStatus: StudentFee['status'] =
+    remainingActivePaid <= 0 ? 'Pending' : newBalance === 0 ? 'Paid' : 'Partial';
+
+  const now = new Date().toISOString();
+  const logId = `faud_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+  const actorName = (voidedBy || 'School Director').slice(0, 120);
+
+  const auditEntry: FeeAuditLog = {
+    id: logId,
+    actionType: 'void_payment',
+    studentId: studentFee.studentId,
+    studentName: studentFee.studentName,
+    admissionNo: studentFee.admissionNo,
+    className: studentFee.className,
+    session: studentFee.session,
+    term: studentFee.term,
+    studentFeeId: studentFee.id,
+    categoryId: studentFee.categoryId,
+    categoryName: studentFee.categoryName,
+    paymentId: payment.id,
+    receiptNo: payment.receiptNo,
+    reason: trimmedReason,
+    oldValues: {
+      amount: payment.amount,
+      paymentDate: payment.paymentDate,
+      paymentMethod: payment.paymentMethod,
+      paidAmount: studentFee.amountPaid,
+      balance: studentFee.balance,
+      status: studentFee.status,
+    },
+    newValues: {
+      amount: 0,
+      paidAmount: remainingActivePaid,
+      balance: newBalance,
+      status: newStatus,
+    },
+    performedBy: actorName,
+    performedByUid: voidedByUid,
+    performedAt: now,
+  };
+
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'feePayments', payment.id), {
+    isVoided: true,
+    voidedAt: now,
+    voidedBy: actorName,
+    voidedByUid,
+    voidReason: trimmedReason,
+  });
+
+  batch.update(doc(db, 'studentFees', studentFee.id), {
+    amountPaid: remainingActivePaid,
+    balance: newBalance,
+    status: newStatus,
+    updatedAt: now,
+  });
+
+  if (student) {
+    const otherFees = allStudentFeesForStudent.filter((f) => f.id !== studentFee.id);
+    const totalDueAll =
+      studentFee.amountDue + otherFees.reduce((s, f) => s + f.amountDue, 0);
+    const totalPaidAll =
+      remainingActivePaid +
+      otherFees.reduce((s, f) => {
+        const pSum = existingPayments
+          .filter((p) => p.studentFeeId === f.id && !p.isVoided && p.amount > 0)
+          .reduce((acc, p) => acc + p.amount, 0);
+        return s + pSum;
+      }, 0);
+
+    const overallStatus: Student['feeStatus'] =
+      totalPaidAll <= 0
+        ? 'Pending'
+        : totalPaidAll >= totalDueAll
+        ? 'Paid'
+        : 'Partial';
+
+    batch.update(doc(db, 'students', student.id), {
+      feeStatus: overallStatus,
+      updatedAt: now,
+    });
+  }
+
+  batch.set(doc(db, 'feeAuditLogs', logId), stripUndefined(auditEntry));
+
+  try {
+    await batch.commit();
+    return {
+      updatedPayment: {
+        ...payment,
+        isVoided: true,
+        voidedAt: now,
+        voidedBy: actorName,
+        voidedByUid,
+        voidReason: trimmedReason,
+      },
+      updatedFee: {
+        ...studentFee,
+        amountPaid: remainingActivePaid,
+        balance: newBalance,
+        status: newStatus,
+        updatedAt: now,
+      },
+      log: auditEntry,
+    };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `feePayments/${payment.id}`);
+  }
+}
+
 export async function recordManualPaymentInFirestore(params: {
   studentFee: StudentFee;
   student?: Student;
@@ -566,13 +1435,10 @@ export async function recordManualPaymentInFirestore(params: {
   if (!paymentDate || paymentDate.length !== 10) {
     throw new Error('Please provide a valid payment date (YYYY-MM-DD).');
   }
-  if (paymentMethod !== 'Cash' && !transactionRef.trim()) {
-    throw new Error(`Please provide a transaction reference or teller number for ${paymentMethod}.`);
-  }
 
-  // Reconcile paid amount strictly from existing valid payment records
+  // Reconcile paid amount strictly from existing active (non-voided) payment records
   const priorPaid = existingPayments
-    .filter((p) => p.studentFeeId === studentFee.id)
+    .filter((p) => p.studentFeeId === studentFee.id && !p.isVoided && p.amount > 0)
     .reduce((sum, p) => sum + p.amount, 0);
   const currentBalance = Math.max(0, studentFee.amountDue - priorPaid);
 
@@ -580,16 +1446,13 @@ export async function recordManualPaymentInFirestore(params: {
     throw new Error('This fee item has already been paid in full.');
   }
   if (payAmount > currentBalance) {
-    throw new Error(
-      `Payment amount (${formatNaira(payAmount)}) exceeds outstanding balance (${formatNaira(
-        currentBalance
-      )}).`
-    );
+    throw new Error(`Amount is more than the outstanding balance of ${formatNaira(currentBalance)}`);
   }
 
   const receiptNo = generateUniqueReceiptNumber(studentFee.term, existingPayments);
   const paymentId = `pay_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
   const now = new Date().toISOString();
+  const suffix = receiptNo.split('-').pop() || paymentId.slice(-6);
 
   const paymentRecord: FeePayment = {
     id: paymentId,
@@ -607,7 +1470,9 @@ export async function recordManualPaymentInFirestore(params: {
     amount: payAmount,
     paymentDate,
     paymentMethod,
-    transactionRef: transactionRef.trim() || `CASH-${receiptNo.split('-').pop()}`,
+    transactionRef:
+      transactionRef.trim() ||
+      (paymentMethod === 'Cash' ? `CASH-${suffix}` : `REF-${suffix}`),
     notes: notes?.trim() || '',
     recordedBy,
     recordedByUid,
@@ -637,7 +1502,7 @@ export async function recordManualPaymentInFirestore(params: {
       newTotalPaid +
       otherFees.reduce((s, f) => {
         const pSum = existingPayments
-          .filter((p) => p.studentFeeId === f.id)
+          .filter((p) => p.studentFeeId === f.id && !p.isVoided && p.amount > 0)
           .reduce((acc, p) => acc + p.amount, 0);
         return s + pSum;
       }, 0);
@@ -671,13 +1536,13 @@ export function reconcileStudentFeesWithPayments(
 ): StudentFee[] {
   const paidByFeeId = new Map<string, number>();
   payments.forEach((p) => {
-    if (p.amount > 0 && p.studentFeeId) {
+    if (!p.isVoided && p.amount > 0 && p.studentFeeId) {
       paidByFeeId.set(p.studentFeeId, (paidByFeeId.get(p.studentFeeId) || 0) + p.amount);
     }
   });
 
   return studentFees.map((fee) => {
-    const verifiedPaid = Math.min(fee.amountDue, paidByFeeId.get(fee.id) || 0);
+    const verifiedPaid = paidByFeeId.get(fee.id) || 0;
     const balance = Math.max(0, fee.amountDue - verifiedPaid);
     const status: StudentFee['status'] =
       verifiedPaid <= 0 ? 'Pending' : balance === 0 ? 'Paid' : 'Partial';
@@ -690,10 +1555,18 @@ export function reconcileStudentFeesWithPayments(
   });
 }
 
+export interface StatementPaymentRow {
+  payment: FeePayment;
+  installmentNumber: number | null;
+  itemRunningBalance: number;
+  statementRunningBalance: number;
+}
+
 export interface StudentFeeStatement {
   student: Student;
   fees: StudentFee[];
   payments: FeePayment[];
+  paymentEntries: StatementPaymentRow[];
   totalExpected: number;
   totalPaid: number;
   outstandingBalance: number;
@@ -718,6 +1591,7 @@ export function computeStudentStatement(params: {
     )
     .sort((a, b) => a.term.localeCompare(b.term) || a.categoryName.localeCompare(b.categoryName));
 
+  // Chronological date order (ascending) so installments read cleanly with running balances
   const stuPayments = payments
     .filter(
       (p) =>
@@ -725,11 +1599,46 @@ export function computeStudentStatement(params: {
         p.session === session &&
         (term === 'All' || p.term === term)
     )
-    .sort((a, b) => b.paymentDate.localeCompare(a.paymentDate) || b.createdAt.localeCompare(a.createdAt));
+    .sort(
+      (a, b) =>
+        (a.paymentDate || '').localeCompare(b.paymentDate || '') ||
+        (a.createdAt || '').localeCompare(b.createdAt || '') ||
+        a.id.localeCompare(b.id)
+    );
 
   const totalExpected = stuFees.reduce((s, f) => s + f.amountDue, 0);
   const totalPaid = stuFees.reduce((s, f) => s + f.amountPaid, 0);
   const outstandingBalance = Math.max(0, totalExpected - totalPaid);
+
+  const feeById = new Map(stuFees.map((f) => [f.id, f]));
+  const paidPerFee = new Map<string, number>();
+  const seqPerFee = new Map<string, number>();
+  let cumulativeStatementPaid = 0;
+
+  const paymentEntries: StatementPaymentRow[] = stuPayments.map((p) => {
+    const isActive = !p.isVoided && p.amount > 0;
+    const feeObj = feeById.get(p.studentFeeId);
+    const feeExpected = feeObj?.amountDue ?? 0;
+
+    let seq: number | null = null;
+    if (isActive) {
+      seq = (seqPerFee.get(p.studentFeeId) || 0) + 1;
+      seqPerFee.set(p.studentFeeId, seq);
+      paidPerFee.set(p.studentFeeId, (paidPerFee.get(p.studentFeeId) || 0) + p.amount);
+      cumulativeStatementPaid += p.amount;
+    }
+
+    const itemPaidSoFar = paidPerFee.get(p.studentFeeId) || 0;
+    const itemRunningBalance = feeObj ? Math.max(0, feeExpected - itemPaidSoFar) : 0;
+    const statementRunningBalance = Math.max(0, totalExpected - cumulativeStatementPaid);
+
+    return {
+      payment: p,
+      installmentNumber: seq,
+      itemRunningBalance,
+      statementRunningBalance,
+    };
+  });
 
   let overallStatus: StudentFeeStatement['overallStatus'] = 'No Fees Assigned';
   if (stuFees.length > 0) {
@@ -741,6 +1650,7 @@ export function computeStudentStatement(params: {
     student,
     fees: stuFees,
     payments: stuPayments,
+    paymentEntries,
     totalExpected,
     totalPaid,
     outstandingBalance,
@@ -852,10 +1762,24 @@ export async function downloadPaymentReceiptPDF(params: {
   payment: FeePayment;
   schoolSettings: SchoolSetting;
   feeItem?: StudentFee;
+  paymentsForFee?: FeePayment[];
 }): Promise<void> {
-  const { payment, schoolSettings, feeItem } = params;
+  const { payment, schoolSettings, feeItem, paymentsForFee } = params;
   const docPdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a5' });
   const pageWidth = docPdf.internal.pageSize.getWidth();
+
+  const history =
+    feeItem && paymentsForFee && paymentsForFee.length > 0
+      ? computeInstallmentHistoryForFee(feeItem, paymentsForFee)
+      : [];
+  const historyMatch = history.find((h) => h.payment.id === payment.id);
+  const totalPaidSoFar = historyMatch
+    ? historyMatch.cumulativePaidAfter
+    : feeItem?.amountPaid ?? payment.amount;
+  const remainingBalance = historyMatch
+    ? historyMatch.runningBalanceAfter
+    : feeItem?.balance ?? 0;
+  const isFullyPaid = !payment.isVoided && Boolean(feeItem) && remainingBalance === 0;
 
   // Header Logo
   const logoAsset = await loadImageForPdf(schoolSettings.logoDataUrl);
@@ -901,12 +1825,23 @@ export async function downloadPaymentReceiptPDF(params: {
   );
 
   // Banner
-  docPdf.setFillColor(122, 20, 36);
+  docPdf.setFillColor(payment.isVoided ? 153 : 122, payment.isVoided ? 27 : 20, payment.isVoided ? 27 : 36);
   docPdf.rect(12, 29, pageWidth - 24, 7, 'F');
   docPdf.setTextColor(253, 224, 71);
   docPdf.setFont('helvetica', 'bold');
   docPdf.setFontSize(8.5);
-  docPdf.text('OFFICIAL BURSARY PAYMENT RECEIPT', pageWidth / 2, 33.8, { align: 'center' });
+  docPdf.text(
+    payment.isVoided
+      ? 'OFFICIAL BURSARY RECEIPT — VOIDED'
+      : isFullyPaid
+      ? 'OFFICIAL BURSARY PAYMENT RECEIPT — FULLY PAID'
+      : payment.isEdited
+      ? 'OFFICIAL BURSARY PAYMENT RECEIPT (EDITED)'
+      : 'OFFICIAL BURSARY PAYMENT RECEIPT',
+    pageWidth / 2,
+    33.8,
+    { align: 'center' }
+  );
 
   // Receipt Details
   docPdf.setTextColor(15, 23, 42);
@@ -919,7 +1854,12 @@ export async function downloadPaymentReceiptPDF(params: {
     ['Admission Number:', payment.admissionNo],
     ['Class:', payment.className],
     ['Session & Term:', `${payment.session} — ${payment.term}`],
-    ['Fee Category:', payment.categoryName],
+    [
+      'Fee Category:',
+      historyMatch?.installmentNumber
+        ? `${payment.categoryName} (Installment #${historyMatch.installmentNumber})`
+        : payment.categoryName,
+    ],
     ['Payment Method:', payment.paymentMethod],
     ['Transaction Reference:', payment.transactionRef],
     ['Recorded By:', payment.recordedBy],
@@ -930,36 +1870,64 @@ export async function downloadPaymentReceiptPDF(params: {
     docPdf.text(label, 14, y);
     docPdf.setFont('helvetica', 'normal');
     docPdf.text(val, 58, y);
-    y += 6.2;
+    y += 5.8;
   });
 
-  // Amount Paid Box
+  // Amount Paid & Balance Summary Box
   y += 2;
-  docPdf.setFillColor(240, 253, 244);
-  docPdf.setDrawColor(16, 185, 129);
-  docPdf.roundedRect(12, y, pageWidth - 24, 18, 2, 2, 'FD');
+  if (payment.isVoided) {
+    docPdf.setFillColor(254, 242, 242);
+    docPdf.setDrawColor(220, 38, 38);
+  } else {
+    docPdf.setFillColor(240, 253, 244);
+    docPdf.setDrawColor(16, 185, 129);
+  }
+  docPdf.roundedRect(12, y, pageWidth - 24, feeItem ? 25 : 16, 2, 2, 'FD');
   docPdf.setFont('helvetica', 'bold');
   docPdf.setFontSize(9);
-  docPdf.setTextColor(6, 95, 70);
-  docPdf.text('AMOUNT PAID:', 16, y + 7.5);
+  docPdf.setTextColor(payment.isVoided ? 153 : 6, payment.isVoided ? 27 : 95, payment.isVoided ? 27 : 70);
+  docPdf.text(payment.isVoided ? 'VOIDED AMOUNT:' : 'THIS PAYMENT:', 16, y + 7.5);
   docPdf.setFontSize(13);
-  docPdf.text(formatPdfNaira(payment.amount), pageWidth - 16, y + 8, { align: 'right' });
+  docPdf.text(
+    payment.isVoided ? `${formatPdfNaira(payment.amount)} (VOIDED)` : formatPdfNaira(payment.amount),
+    pageWidth - 16,
+    y + 8,
+    { align: 'right' }
+  );
 
   if (feeItem) {
     docPdf.setFontSize(7.5);
     docPdf.setFont('helvetica', 'normal');
     docPdf.setTextColor(51, 65, 85);
     docPdf.text(
-      `Total Fee Billed: ${formatPdfNaira(feeItem.amountDue)}  |  Remaining Balance on Item: ${formatPdfNaira(feeItem.balance)}`,
+      `Expected: ${formatPdfNaira(feeItem.amountDue)}  |  Total Paid So Far: ${formatPdfNaira(
+        totalPaidSoFar
+      )}`,
       16,
-      y + 14.2
+      y + 14.5
+    );
+    docPdf.setFont('helvetica', 'bold');
+    docPdf.setTextColor(isFullyPaid ? 6 : 125, isFullyPaid ? 95 : 90, isFullyPaid ? 70 : 24);
+    docPdf.text(
+      isFullyPaid
+        ? `Remaining Balance: ${formatPdfNaira(0)}  —  FULLY PAID`
+        : `Remaining Balance: ${formatPdfNaira(remainingBalance)}`,
+      16,
+      y + 20.5
     );
   }
 
-  y += 28;
+  y += feeItem ? 32 : 23;
+  docPdf.setFont('helvetica', 'normal');
   docPdf.setFontSize(7.5);
   docPdf.setTextColor(100, 116, 139);
-  docPdf.text('This receipt confirms manual bursary recording of the stated amount.', 12, y);
+  docPdf.text(
+    payment.isVoided
+      ? `VOIDED${payment.voidReason ? `: ${payment.voidReason}` : ' — excluded from all school totals.'}`
+      : 'This receipt confirms manual bursary recording of the stated amount.',
+    12,
+    y
+  );
   docPdf.text('Authorized Bursar Signature', pageWidth - 12, y + 8, { align: 'right' });
 
   const safeRct = payment.receiptNo.replace(/[^a-zA-Z0-9_-]/g, '-');
@@ -1068,21 +2036,35 @@ export async function downloadStudentStatementPDF(params: {
 
   autoTable(docPdf, {
     startY: nextY + 3,
-    head: [['Receipt No', 'Date', 'Fee Category', 'Method', 'Reference', 'Amount']],
+    head: [['Receipt No', 'Date', 'Fee Category', 'Method', 'Amount Paid', 'Running Balance']],
     body:
-      statement.payments.length === 0
+      statement.paymentEntries.length === 0
         ? [['No payments recorded yet.', '', '', '', '', '']]
-        : statement.payments.map((p) => [
-            p.receiptNo,
-            p.paymentDate,
-            p.categoryName,
-            p.paymentMethod,
-            p.transactionRef,
-            formatPdfNaira(p.amount),
-          ]),
+        : statement.paymentEntries.map((entry) => {
+            const p = entry.payment;
+            const instLabel = entry.installmentNumber
+              ? ` (Inst. #${entry.installmentNumber})`
+              : '';
+            return [
+              p.isVoided
+                ? `${p.receiptNo} [VOIDED]`
+                : p.isEdited
+                ? `${p.receiptNo} [EDITED]`
+                : p.receiptNo,
+              p.paymentDate,
+              `${p.categoryName}${instLabel}`,
+              `${p.paymentMethod}${p.transactionRef ? ` (${p.transactionRef})` : ''}`,
+              p.isVoided ? `${formatPdfNaira(p.amount)} (Voided)` : formatPdfNaira(p.amount),
+              p.isVoided
+                ? 'Excluded'
+                : entry.itemRunningBalance === 0
+                ? `${formatPdfNaira(0)} (Fully Paid)`
+                : formatPdfNaira(entry.itemRunningBalance),
+            ];
+          }),
     theme: 'grid',
     headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontSize: 8 },
-    bodyStyles: { fontSize: 8 },
+    bodyStyles: { fontSize: 7.5 },
   });
 
   const safeAdm = statement.student.admissionNo.replace(/[^a-zA-Z0-9_-]/g, '-');
@@ -1247,6 +2229,7 @@ export function exportPaymentsLedgerCSV(params: {
       'Payment Method',
       'Transaction Ref',
       'Recorded By',
+      'Status',
     ],
     payments.map((p) => [
       p.receiptNo,
@@ -1257,10 +2240,11 @@ export function exportPaymentsLedgerCSV(params: {
       p.session,
       p.term,
       p.categoryName,
-      String(p.amount),
+      p.isVoided ? '0' : String(p.amount),
       p.paymentMethod,
       p.transactionRef,
       p.recordedBy,
+      p.isVoided ? 'Voided' : p.isEdited ? 'Edited' : 'Active',
     ])
   );
 }

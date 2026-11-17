@@ -69,6 +69,13 @@ service cloud.firestore {
       );
     }
 
+    function isBursar() {
+      return isAccountActive() && (
+        isDirector() ||
+        getUserDoc().role == 'bursar'
+      );
+    }
+
     function isTeacher() {
       return isAccountActive() && getUserDoc().role == 'teacher';
     }
@@ -116,7 +123,7 @@ service cloud.firestore {
              data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128 &&
              data.email is string && data.email.size() > 0 && data.email.size() <= 128 &&
              data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 100 &&
-             data.role in ['director', 'principal', 'head_teacher', 'teacher', 'parent'] &&
+             data.role in ['director', 'principal', 'head_teacher', 'bursar', 'teacher', 'parent'] &&
              (!data.keys().hasAny(['isActive']) || data.isActive is bool) &&
              (!data.keys().hasAny(['inviteId']) || (data.inviteId is string && data.inviteId.size() <= 128)) &&
              (!data.keys().hasAny(['phone']) || (data.phone is string && data.phone.size() <= 30)) &&
@@ -146,7 +153,7 @@ service cloud.firestore {
              ]) &&
              data.email is string && data.email.size() > 0 && data.email.size() <= 128 &&
              data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 100 &&
-             data.role in ['director', 'principal', 'head_teacher', 'teacher', 'parent'] &&
+             data.role in ['director', 'principal', 'head_teacher', 'bursar', 'teacher', 'parent'] &&
              data.isActive is bool &&
              (!data.keys().hasAny(['id']) || (data.id is string && data.id.size() <= 128)) &&
              (!data.keys().hasAny(['phone']) || (data.phone is string && data.phone.size() <= 30)) &&
@@ -593,8 +600,8 @@ service cloud.firestore {
              data.categoryId is string && data.categoryId.size() > 0 && data.categoryId.size() <= 128 &&
              data.categoryName is string && data.categoryName.size() > 0 && data.categoryName.size() <= 100 &&
              data.amountDue is number && data.amountDue > 0 && data.amountDue <= 50000000 &&
-             data.amountPaid is number && data.amountPaid >= 0 && data.amountPaid <= data.amountDue &&
-             data.balance is number && data.balance >= 0 && data.balance <= data.amountDue &&
+             data.amountPaid is number && data.amountPaid >= 0 && data.amountPaid <= 50000000 &&
+             data.balance is number && data.balance >= 0 && data.balance <= 50000000 &&
              data.status in ['Paid', 'Partial', 'Pending'] &&
              (!data.keys().hasAny(['dueDate']) || (data.dueDate is string && data.dueDate.size() <= 20)) &&
              (!data.keys().hasAny(['assignedBy']) || (data.assignedBy is string && data.assignedBy.size() <= 120)) &&
@@ -608,7 +615,9 @@ service cloud.firestore {
                'id', 'receiptNo', 'studentFeeId', 'studentId', 'studentName', 'admissionNo',
                'guardianEmail', 'className', 'session', 'term', 'categoryId', 'categoryName',
                'amount', 'paymentDate', 'paymentMethod', 'transactionRef', 'notes',
-               'recordedBy', 'recordedByUid', 'createdAt'
+               'recordedBy', 'recordedByUid', 'createdAt',
+               'isEdited', 'editedAt', 'editedBy', 'editReason',
+               'isVoided', 'voidedAt', 'voidedBy', 'voidedByUid', 'voidReason'
              ]) &&
              (!data.keys().hasAny(['id']) || (data.id is string && data.id.size() <= 128)) &&
              data.receiptNo is string && data.receiptNo.size() > 0 && data.receiptNo.size() <= 40 &&
@@ -629,7 +638,104 @@ service cloud.firestore {
              (!data.keys().hasAny(['notes']) || (data.notes is string && data.notes.size() <= 300)) &&
              data.recordedBy is string && data.recordedBy.size() > 0 && data.recordedBy.size() <= 120 &&
              data.recordedByUid is string && data.recordedByUid.size() > 0 && data.recordedByUid.size() <= 128 &&
-             (!data.keys().hasAny(['createdAt']) || (data.createdAt is string && data.createdAt.size() <= 50));
+             (!data.keys().hasAny(['createdAt']) || (data.createdAt is string && data.createdAt.size() <= 50)) &&
+             (!data.keys().hasAny(['isEdited']) || data.isEdited is bool) &&
+             (!data.keys().hasAny(['editedAt']) || (data.editedAt is string && data.editedAt.size() <= 50)) &&
+             (!data.keys().hasAny(['editedBy']) || (data.editedBy is string && data.editedBy.size() <= 120)) &&
+             (!data.keys().hasAny(['editReason']) || (data.editReason is string && data.editReason.size() <= 300)) &&
+             (!data.keys().hasAny(['isVoided']) || data.isVoided is bool) &&
+             (!data.keys().hasAny(['voidedAt']) || (data.voidedAt is string && data.voidedAt.size() <= 50)) &&
+             (!data.keys().hasAny(['voidedBy']) || (data.voidedBy is string && data.voidedBy.size() <= 120)) &&
+             (!data.keys().hasAny(['voidedByUid']) || (data.voidedByUid is string && data.voidedByUid.size() <= 128)) &&
+             (!data.keys().hasAny(['voidReason']) || (data.voidReason is string && data.voidReason.size() <= 300));
+    }
+
+    function isValidFeeDeletionLog(data) {
+      return data.keys().hasAll([
+               'deletionType', 'studentId', 'studentName', 'admissionNo', 'className',
+               'session', 'term', 'studentFeeId', 'categoryId', 'categoryName',
+               'receiptNo', 'amount', 'reason', 'deletedBy', 'deletedByUid', 'deletedAt'
+             ]) &&
+             data.keys().hasOnly([
+               'id', 'deletionType', 'studentId', 'studentName', 'admissionNo', 'className',
+               'session', 'term', 'studentFeeId', 'categoryId', 'categoryName',
+               'paymentId', 'receiptNo', 'amount', 'expectedAmount', 'paidAmount',
+               'paymentMethod', 'paymentDate', 'reason', 'deletedBy', 'deletedByUid', 'deletedAt'
+             ]) &&
+             (!data.keys().hasAny(['id']) || (data.id is string && data.id.size() > 0 && data.id.size() <= 128)) &&
+             data.deletionType in ['payment', 'fee_item'] &&
+             data.studentId is string && data.studentId.size() > 0 && data.studentId.size() <= 128 &&
+             data.studentName is string && data.studentName.size() > 0 && data.studentName.size() <= 150 &&
+             data.admissionNo is string && data.admissionNo.size() > 0 && data.admissionNo.size() <= 30 &&
+             data.className is string && data.className.size() > 0 && data.className.size() <= 60 &&
+             data.session is string && data.session.size() > 0 && data.session.size() <= 40 &&
+             data.term in ['First Term', 'Second Term', 'Third Term'] &&
+             data.studentFeeId is string && data.studentFeeId.size() > 0 && data.studentFeeId.size() <= 128 &&
+             data.categoryId is string && data.categoryId.size() > 0 && data.categoryId.size() <= 128 &&
+             data.categoryName is string && data.categoryName.size() > 0 && data.categoryName.size() <= 100 &&
+             (!data.keys().hasAny(['paymentId']) || (data.paymentId is string && data.paymentId.size() > 0 && data.paymentId.size() <= 128)) &&
+             data.receiptNo is string && data.receiptNo.size() > 0 && data.receiptNo.size() <= 500 &&
+             data.amount is number && data.amount >= 0 && data.amount <= 50000000 &&
+             (!data.keys().hasAny(['expectedAmount']) || (data.expectedAmount is number && data.expectedAmount >= 0 && data.expectedAmount <= 50000000)) &&
+             (!data.keys().hasAny(['paidAmount']) || (data.paidAmount is number && data.paidAmount >= 0 && data.paidAmount <= 50000000)) &&
+             (!data.keys().hasAny(['paymentMethod']) || data.paymentMethod in ['Bank Transfer', 'POS', 'Cash', 'Cheque', 'Bank Teller / Deposit']) &&
+             (!data.keys().hasAny(['paymentDate']) || (data.paymentDate is string && data.paymentDate.size() <= 20)) &&
+             data.reason is string && data.reason.size() > 0 && data.reason.size() <= 300 &&
+             data.deletedBy is string && data.deletedBy.size() > 0 && data.deletedBy.size() <= 120 &&
+             data.deletedByUid is string && data.deletedByUid.size() > 0 && data.deletedByUid.size() <= 128 &&
+             data.deletedAt is string && data.deletedAt.size() > 0 && data.deletedAt.size() <= 50;
+    }
+
+    function isValidFeeAuditSnapshot(snap) {
+      return snap is map &&
+             snap.keys().hasOnly([
+               'expectedAmount', 'dueDate', 'paidAmount', 'balance', 'status',
+               'amount', 'paymentDate', 'paymentMethod', 'notes', 'receiptNo'
+             ]) &&
+             (!snap.keys().hasAny(['expectedAmount']) || (snap.expectedAmount is number && snap.expectedAmount >= 0 && snap.expectedAmount <= 50000000)) &&
+             (!snap.keys().hasAny(['dueDate']) || (snap.dueDate is string && snap.dueDate.size() <= 40)) &&
+             (!snap.keys().hasAny(['paidAmount']) || (snap.paidAmount is number && snap.paidAmount >= 0 && snap.paidAmount <= 50000000)) &&
+             (!snap.keys().hasAny(['balance']) || (snap.balance is number && snap.balance >= 0 && snap.balance <= 50000000)) &&
+             (!snap.keys().hasAny(['status']) || (snap.status is string && snap.status.size() <= 20)) &&
+             (!snap.keys().hasAny(['amount']) || (snap.amount is number && snap.amount >= 0 && snap.amount <= 50000000)) &&
+             (!snap.keys().hasAny(['paymentDate']) || (snap.paymentDate is string && snap.paymentDate.size() <= 20)) &&
+             (!snap.keys().hasAny(['paymentMethod']) || (snap.paymentMethod is string && snap.paymentMethod.size() <= 40)) &&
+             (!snap.keys().hasAny(['notes']) || (snap.notes is string && snap.notes.size() <= 300)) &&
+             (!snap.keys().hasAny(['receiptNo']) || (snap.receiptNo is string && snap.receiptNo.size() <= 500));
+    }
+
+    function isValidFeeAuditLog(data) {
+      return data.keys().hasAll([
+               'actionType', 'studentId', 'studentName', 'admissionNo', 'className',
+               'session', 'term', 'studentFeeId', 'categoryId', 'categoryName',
+               'receiptNo', 'reason', 'oldValues', 'newValues',
+               'performedBy', 'performedByUid', 'performedAt'
+             ]) &&
+             data.keys().hasOnly([
+               'id', 'actionType', 'studentId', 'studentName', 'admissionNo', 'className',
+               'session', 'term', 'studentFeeId', 'categoryId', 'categoryName',
+               'paymentId', 'receiptNo', 'reason', 'oldValues', 'newValues',
+               'performedBy', 'performedByUid', 'performedAt'
+             ]) &&
+             (!data.keys().hasAny(['id']) || (data.id is string && data.id.size() > 0 && data.id.size() <= 128)) &&
+             data.actionType in ['edit_payment', 'edit_expected_amount', 'edit_due_date', 'void_payment', 'delete_fee_item'] &&
+             data.studentId is string && data.studentId.size() > 0 && data.studentId.size() <= 128 &&
+             data.studentName is string && data.studentName.size() > 0 && data.studentName.size() <= 150 &&
+             data.admissionNo is string && data.admissionNo.size() > 0 && data.admissionNo.size() <= 30 &&
+             data.className is string && data.className.size() > 0 && data.className.size() <= 60 &&
+             data.session is string && data.session.size() > 0 && data.session.size() <= 40 &&
+             data.term in ['First Term', 'Second Term', 'Third Term'] &&
+             data.studentFeeId is string && data.studentFeeId.size() > 0 && data.studentFeeId.size() <= 128 &&
+             data.categoryId is string && data.categoryId.size() > 0 && data.categoryId.size() <= 128 &&
+             data.categoryName is string && data.categoryName.size() > 0 && data.categoryName.size() <= 100 &&
+             (!data.keys().hasAny(['paymentId']) || (data.paymentId is string && data.paymentId.size() > 0 && data.paymentId.size() <= 128)) &&
+             data.receiptNo is string && data.receiptNo.size() > 0 && data.receiptNo.size() <= 500 &&
+             data.reason is string && data.reason.size() > 0 && data.reason.size() <= 300 &&
+             isValidFeeAuditSnapshot(data.oldValues) &&
+             isValidFeeAuditSnapshot(data.newValues) &&
+             data.performedBy is string && data.performedBy.size() > 0 && data.performedBy.size() <= 120 &&
+             data.performedByUid is string && data.performedByUid.size() > 0 && data.performedByUid.size() <= 128 &&
+             data.performedAt is string && data.performedAt.size() > 0 && data.performedAt.size() <= 50;
     }
 
     // ==================== COLLECTION RULES ====================
@@ -693,17 +799,23 @@ service cloud.firestore {
       allow get: if isAccountActive() && (
         isPrincipal() ||
         isHeadTeacher() ||
+        isBursar() ||
         (isTeacher() && teacherHasClass(resource.data.className)) ||
         (isParent() && parentHasWard(studentId, resource.data.guardianEmail))
       );
       allow list: if isAccountActive() && (
         isPrincipal() ||
         isHeadTeacher() ||
+        isBursar() ||
         (isTeacher() && teacherHasClass(resource.data.className)) ||
         (isParent() && parentHasWard(studentId, resource.data.guardianEmail))
       );
       allow create: if isPrincipal() && isValidId(studentId) && isValidStudent(incoming());
-      allow update: if isPrincipal() && isValidId(studentId) && isValidStudent(incoming());
+      allow update: if isValidId(studentId) && isValidStudent(incoming()) && (
+        isPrincipal() ||
+        (isBursar() &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['feeStatus', 'updatedAt']))
+      );
       allow delete: if isDirector() && isValidId(studentId);
     }
 
@@ -887,12 +999,12 @@ service cloud.firestore {
     match /announcements/{announcementId} {
       allow get: if isAccountActive() && (
         isPrincipal() ||
-        ((isTeacher() || isHeadTeacher()) && resource.data.status == 'Published' && resource.data.targetAudience in ['All', 'Teachers', 'Specific Classes']) ||
+        ((isTeacher() || isHeadTeacher() || isBursar()) && resource.data.status == 'Published' && resource.data.targetAudience in ['All', 'Teachers', 'Specific Classes']) ||
         (isParent() && resource.data.status == 'Published' && resource.data.targetAudience in ['All', 'Parents', 'Students', 'Specific Classes'])
       );
       allow list: if isAccountActive() && (
         isPrincipal() ||
-        ((isTeacher() || isHeadTeacher()) && resource.data.status == 'Published' && resource.data.targetAudience in ['All', 'Teachers', 'Specific Classes']) ||
+        ((isTeacher() || isHeadTeacher() || isBursar()) && resource.data.status == 'Published' && resource.data.targetAudience in ['All', 'Teachers', 'Specific Classes']) ||
         (isParent() && resource.data.status == 'Published' && resource.data.targetAudience in ['All', 'Parents', 'Students', 'Specific Classes'])
       );
       allow create, update: if isPrincipal() && isValidId(announcementId) && isValidAnnouncement(incoming());
@@ -930,58 +1042,95 @@ service cloud.firestore {
 
     // ==================== SCHOOL FEES & PAYMENT RECORDING ====================
 
-    // Fee Categories (Admin Bursary Configuration)
+    // Fee Categories (Admin & Bursar view; Director & Principal manage)
     match /feeCategories/{categoryId} {
-      allow get, list: if isPrincipal();
+      allow get, list: if isPrincipal() || isBursar();
       allow create, update: if isPrincipal() && isValidId(categoryId) && isValidFeeCategory(incoming());
       allow delete: if isDirector() && isValidId(categoryId);
     }
 
-    // Class, Term & Session Fee Schedules (Admin Bursary Configuration)
+    // Class, Term & Session Fee Schedules (Admin & Bursar view; Director & Principal manage)
     match /feeSchedules/{scheduleId} {
-      allow get, list: if isPrincipal();
+      allow get, list: if isPrincipal() || isBursar();
       allow create, update: if isPrincipal() && isValidId(scheduleId) && isValidFeeSchedule(incoming());
       allow delete: if isPrincipal() && isValidId(scheduleId);
     }
 
-    // Assigned Student Fees (Never created as Paid without payment records)
+    // Assigned Student Fees (Never created as Paid without payment records; only Bursar/Director update payment totals)
     match /studentFees/{studentFeeId} {
       allow get: if isAccountActive() && (
         isPrincipal() ||
+        isBursar() ||
         (isParent() && parentHasWard(resource.data.studentId, resource.data.guardianEmail))
       );
       allow list: if isAccountActive() && (
         isPrincipal() ||
+        isBursar() ||
         (isParent() && parentHasWard(resource.data.studentId, resource.data.guardianEmail))
       );
       allow create: if isPrincipal() && isValidId(studentFeeId) && isValidStudentFee(incoming()) &&
         incoming().amountPaid == 0 &&
         incoming().status == 'Pending' &&
         incoming().balance == incoming().amountDue;
-      allow update: if isPrincipal() && isValidId(studentFeeId) && isValidStudentFee(incoming()) &&
+      allow update: if isValidId(studentFeeId) && isValidStudentFee(incoming()) &&
         incoming().studentId == existing().studentId &&
         incoming().session == existing().session &&
         incoming().term == existing().term &&
         incoming().categoryId == existing().categoryId &&
-        incoming().amountDue == existing().amountDue;
+        (isDirector() || (
+          isBursar() &&
+          incoming().amountDue == existing().amountDue &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['amountPaid', 'balance', 'status', 'updatedAt'])
+        ));
       allow delete: if isDirector() && isValidId(studentFeeId);
     }
 
-    // Manually Recorded Fee Payments & Unique Receipts
+    // Manually Recorded Fee Payments & Unique Receipts (Strictly Bursar/Accountant & Director can record; Director-only edits/voids)
     match /feePayments/{paymentId} {
       allow get: if isAccountActive() && (
         isPrincipal() ||
+        isBursar() ||
         (isParent() && parentHasWard(resource.data.studentId, resource.data.guardianEmail))
       );
       allow list: if isAccountActive() && (
         isPrincipal() ||
+        isBursar() ||
         (isParent() && parentHasWard(resource.data.studentId, resource.data.guardianEmail))
       );
-      allow create: if isPrincipal() && isValidId(paymentId) && isValidFeePayment(incoming()) &&
+      allow create: if isBursar() && isValidId(paymentId) && isValidFeePayment(incoming()) &&
         incoming().recordedByUid == request.auth.uid &&
+        (!incoming().keys().hasAny(['isVoided']) || incoming().isVoided == false) &&
+        (!incoming().keys().hasAny(['isEdited']) || incoming().isEdited == false) &&
         existsAfter(/databases/$(database)/documents/studentFees/$(incoming().studentFeeId));
-      allow update: if isDirector() && isValidId(paymentId) && isValidFeePayment(incoming());
+      allow update: if isDirector() && isValidId(paymentId) && isValidFeePayment(incoming()) &&
+        incoming().receiptNo == existing().receiptNo &&
+        incoming().studentFeeId == existing().studentFeeId &&
+        incoming().studentId == existing().studentId &&
+        incoming().session == existing().session &&
+        incoming().term == existing().term &&
+        incoming().categoryId == existing().categoryId &&
+        (!incoming().keys().hasAny(['isVoided']) || incoming().isVoided == false || (
+          incoming().voidedByUid == request.auth.uid &&
+          incoming().keys().hasAny(['voidReason']) &&
+          incoming().voidReason.size() > 0
+        ));
       allow delete: if isDirector() && isValidId(paymentId);
+    }
+
+    // Fee & Payment Deletion Audit Logs (Strictly Director-only, immutable)
+    match /feeDeletionLogs/{logId} {
+      allow get, list: if isDirector();
+      allow create: if isDirector() && isValidId(logId) && isValidFeeDeletionLog(incoming()) &&
+        incoming().deletedByUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // Full Fee Edit, Void & Deletion Audit Logs (Strictly Director-only, immutable)
+    match /feeAuditLogs/{logId} {
+      allow get, list: if isDirector();
+      allow create: if isDirector() && isValidId(logId) && isValidFeeAuditLog(incoming()) &&
+        incoming().performedByUid == request.auth.uid;
+      allow update, delete: if false;
     }
   }
 }

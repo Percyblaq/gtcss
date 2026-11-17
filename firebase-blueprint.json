@@ -8,7 +8,7 @@
         "uid": { "type": "string", "maxLength": 128 },
         "email": { "type": "string", "maxLength": 128 },
         "displayName": { "type": "string", "maxLength": 100 },
-        "role": { "type": "string", "enum": ["director", "principal", "head_teacher", "teacher", "parent"] },
+        "role": { "type": "string", "enum": ["director", "principal", "head_teacher", "bursar", "teacher", "parent"] },
         "isActive": { "type": "boolean" },
         "inviteId": { "type": "string", "maxLength": 128 },
         "phone": { "type": "string", "maxLength": 30 },
@@ -44,7 +44,7 @@
         "id": { "type": "string", "maxLength": 128 },
         "email": { "type": "string", "maxLength": 128 },
         "displayName": { "type": "string", "maxLength": 100 },
-        "role": { "type": "string", "enum": ["director", "principal", "head_teacher", "teacher", "parent"] },
+        "role": { "type": "string", "enum": ["director", "principal", "head_teacher", "bursar", "teacher", "parent"] },
         "isActive": { "type": "boolean" },
         "phone": { "type": "string", "maxLength": 30 },
         "title": { "type": "string", "maxLength": 100 },
@@ -460,9 +460,75 @@
         "notes": { "type": "string", "maxLength": 300 },
         "recordedBy": { "type": "string", "maxLength": 120 },
         "recordedByUid": { "type": "string", "maxLength": 128 },
-        "createdAt": { "type": "string", "maxLength": 50 }
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "isEdited": { "type": "boolean" },
+        "editedAt": { "type": "string", "maxLength": 50 },
+        "editedBy": { "type": "string", "maxLength": 120 },
+        "editReason": { "type": "string", "maxLength": 300 },
+        "isVoided": { "type": "boolean" },
+        "voidedAt": { "type": "string", "maxLength": 50 },
+        "voidedBy": { "type": "string", "maxLength": 120 },
+        "voidedByUid": { "type": "string", "maxLength": 128 },
+        "voidReason": { "type": "string", "maxLength": 300 }
       },
       "required": ["receiptNo", "studentFeeId", "studentId", "studentName", "admissionNo", "className", "session", "term", "categoryId", "categoryName", "amount", "paymentDate", "paymentMethod", "recordedBy", "recordedByUid"]
+    },
+    "FeeAuditLog": {
+      "title": "FeeAuditLog",
+      "description": "Immutable Director-only audit log for every fee amount edit, payment edit, payment void, and fee item deletion with old and new values",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "actionType": { "type": "string", "enum": ["edit_payment", "edit_expected_amount", "edit_due_date", "void_payment", "delete_fee_item"] },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 150 },
+        "admissionNo": { "type": "string", "maxLength": 30 },
+        "className": { "type": "string", "maxLength": 60 },
+        "session": { "type": "string", "maxLength": 40 },
+        "term": { "type": "string", "enum": ["First Term", "Second Term", "Third Term"] },
+        "studentFeeId": { "type": "string", "maxLength": 128 },
+        "categoryId": { "type": "string", "maxLength": 128 },
+        "categoryName": { "type": "string", "maxLength": 100 },
+        "paymentId": { "type": "string", "maxLength": 128 },
+        "receiptNo": { "type": "string", "maxLength": 500 },
+        "reason": { "type": "string", "maxLength": 300 },
+        "oldValues": { "type": "object" },
+        "newValues": { "type": "object" },
+        "performedBy": { "type": "string", "maxLength": 120 },
+        "performedByUid": { "type": "string", "maxLength": 128 },
+        "performedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["actionType", "studentId", "studentName", "admissionNo", "className", "session", "term", "studentFeeId", "categoryId", "categoryName", "receiptNo", "reason", "oldValues", "newValues", "performedBy", "performedByUid", "performedAt"]
+    },
+    "FeeDeletionLog": {
+      "title": "FeeDeletionLog",
+      "description": "Immutable Director-only audit log entry recorded whenever a single fee payment or assigned student fee item is deleted",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "deletionType": { "type": "string", "enum": ["payment", "fee_item"] },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 150 },
+        "admissionNo": { "type": "string", "maxLength": 30 },
+        "className": { "type": "string", "maxLength": 60 },
+        "session": { "type": "string", "maxLength": 40 },
+        "term": { "type": "string", "enum": ["First Term", "Second Term", "Third Term"] },
+        "studentFeeId": { "type": "string", "maxLength": 128 },
+        "categoryId": { "type": "string", "maxLength": 128 },
+        "categoryName": { "type": "string", "maxLength": 100 },
+        "paymentId": { "type": "string", "maxLength": 128 },
+        "receiptNo": { "type": "string", "maxLength": 500 },
+        "amount": { "type": "number" },
+        "expectedAmount": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["Bank Transfer", "POS", "Cash", "Cheque", "Bank Teller / Deposit"] },
+        "paymentDate": { "type": "string", "maxLength": 20 },
+        "reason": { "type": "string", "maxLength": 300 },
+        "deletedBy": { "type": "string", "maxLength": 120 },
+        "deletedByUid": { "type": "string", "maxLength": 128 },
+        "deletedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["deletionType", "studentId", "studentName", "admissionNo", "className", "session", "term", "studentFeeId", "categoryId", "categoryName", "receiptNo", "amount", "reason", "deletedBy", "deletedByUid", "deletedAt"]
     },
     "TimetableSlot": {
       "title": "TimetableSlot",
@@ -553,6 +619,14 @@
     "/feePayments/{paymentId}": {
       "schema": "FeePayment",
       "description": "Manually recorded payment transactions and receipts"
+    },
+    "/feeDeletionLogs/{logId}": {
+      "schema": "FeeDeletionLog",
+      "description": "Immutable Director-only audit log of deleted fee items and payments"
+    },
+    "/feeAuditLogs/{logId}": {
+      "schema": "FeeAuditLog",
+      "description": "Immutable Director-only audit log of fee/payment edits, voids, and deletions"
     },
     "/schoolCalendarEvents/{eventId}": {
       "schema": "SchoolCalendarEvent",

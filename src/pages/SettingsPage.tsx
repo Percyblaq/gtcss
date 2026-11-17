@@ -141,6 +141,7 @@ export const SettingsPage: React.FC = () => {
   const DEFAULT_ROLE_TITLES: Record<UserRole, string> = {
     director: 'School Director',
     principal: 'Principal',
+    bursar: 'Bursar / Accountant',
     head_teacher: 'Headmaster / Headmistress',
     teacher: 'Form Teacher',
     parent: 'Parent / Guardian',
@@ -1085,7 +1086,9 @@ export const SettingsPage: React.FC = () => {
                       ? 'Full Authority'
                       : role === 'principal' || role === 'head_teacher'
                         ? 'Academic Supervisor'
-                        : 'Scoped Access'}
+                        : role === 'bursar'
+                          ? 'Bursary Officer'
+                          : 'Scoped Access'}
                   </span>
                 </div>
                 <p className="text-[11px] text-[#6E6A63]">
@@ -1093,6 +1096,8 @@ export const SettingsPage: React.FC = () => {
                     'Full authority to create staff profiles, assign roles, modify school settings, and deactivate accounts.'}
                   {role === 'principal' &&
                     'Academic leadership, reports, and staff supervision. Role & institutional profile changes restricted to Director.'}
+                  {role === 'bursar' &&
+                    'Bursary operations: collect school fees, record installment payments, and issue receipts.'}
                   {role === 'head_teacher' &&
                     "School-wide academic oversight and Headmaster's/Headmistress's Comment on report cards."}
                 </p>
@@ -1202,6 +1207,7 @@ export const SettingsPage: React.FC = () => {
                               >
                                 <option value="director">Director</option>
                                 <option value="principal">Principal</option>
+                                <option value="bursar">Bursar / Accountant</option>
                                 <option value="head_teacher">Head Teacher</option>
                                 <option value="teacher">Teacher</option>
                                 <option value="parent">Parent</option>
@@ -1265,7 +1271,7 @@ export const SettingsPage: React.FC = () => {
                                 </strong>
                               </span>
                             )}
-                            {(u.role === 'director' || u.role === 'principal' || u.role === 'head_teacher') && (
+                            {(u.role === 'director' || u.role === 'principal' || u.role === 'bursar' || u.role === 'head_teacher') && (
                               <span className="text-[#7F7A72] italic text-[11px]">
                                 All School Levels
                               </span>
@@ -1650,6 +1656,7 @@ export const SettingsPage: React.FC = () => {
                     className="w-full px-3 py-2 border border-[#DDD5C7] rounded-[8px] bg-[#FAF8F4] text-[#2A2A2E] font-medium focus:ring-2 focus:ring-[#6B1020]/20 focus:border-[#6B1020] focus:outline-none transition-colors duration-150"
                   >
                     <option value="principal">Principal</option>
+                    <option value="bursar">Bursar / Accountant</option>
                     <option value="head_teacher">Head Teacher</option>
                     <option value="teacher">Teacher</option>
                     <option value="parent">Parent</option>

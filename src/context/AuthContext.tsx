@@ -231,11 +231,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   ? 'School Director'
                   : invite.role === 'principal'
                     ? 'Principal'
-                    : invite.role === 'head_teacher'
-                      ? (schoolSettings.headTeacherTitle || 'Headmaster')
-                      : invite.role === 'teacher'
-                        ? 'Form / Subject Teacher'
-                        : 'Parent / Guardian');
+                    : invite.role === 'bursar'
+                      ? 'Bursar / Accountant'
+                      : invite.role === 'head_teacher'
+                        ? (schoolSettings.headTeacherTitle || 'Headmaster')
+                        : invite.role === 'teacher'
+                          ? 'Form / Subject Teacher'
+                          : 'Parent / Guardian');
               assignedClasses = invite.assignedClasses || [];
               subjects = getProfileSubjects(invite);
               assignedSubjects = subjects;
