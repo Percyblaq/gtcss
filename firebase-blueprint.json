@@ -1,0 +1,566 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with role-based access information, assigned classes for teachers, and linked students for parents",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["director", "principal", "head_teacher", "teacher", "parent"] },
+        "isActive": { "type": "boolean" },
+        "inviteId": { "type": "string", "maxLength": 128 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "avatar": { "type": "string", "maxLength": 500 },
+        "title": { "type": "string", "maxLength": 100 },
+        "assignedClasses": {
+          "type": "array",
+          "description": "Classes assigned to a teacher e.g. JSS 1A, SSS 2 Science"
+        },
+        "assignedSubjects": {
+          "type": "array",
+          "description": "Subjects assigned to a teacher e.g. Mathematics, Physics"
+        },
+        "subjects": {
+          "type": "array",
+          "description": "Full list of subjects assigned to a teacher (first item is primary subject)"
+        },
+        "primarySubject": { "type": "string", "maxLength": 100 },
+        "linkedStudentIds": {
+          "type": "array",
+          "description": "Student IDs linked to a parent user"
+        },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["uid", "email", "displayName", "role"]
+    },
+    "StaffInvite": {
+      "title": "StaffInvite",
+      "description": "Director pre-provisioned staff or parent invite keyed by normalized email to transfer roles and assignments on first Firebase Authentication",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["director", "principal", "head_teacher", "teacher", "parent"] },
+        "isActive": { "type": "boolean" },
+        "phone": { "type": "string", "maxLength": 30 },
+        "title": { "type": "string", "maxLength": 100 },
+        "assignedClasses": {
+          "type": "array",
+          "description": "Classes pre-assigned to a teacher"
+        },
+        "assignedSubjects": {
+          "type": "array",
+          "description": "Subjects pre-assigned to a teacher"
+        },
+        "subjects": {
+          "type": "array",
+          "description": "Full list of subjects pre-assigned to a teacher (first item is primary subject)"
+        },
+        "primarySubject": { "type": "string", "maxLength": 100 },
+        "linkedStudentIds": {
+          "type": "array",
+          "description": "Student IDs pre-linked to a parent"
+        },
+        "linkedStudentNames": {
+          "type": "array",
+          "description": "Student names pre-linked to a parent"
+        },
+        "provisionedBy": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["email", "displayName", "role", "isActive"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "Student academic and biodata record in the Nigerian secondary school system",
+      "type": "object",
+      "properties": {
+        "admissionNo": { "type": "string", "maxLength": 30 },
+        "firstName": { "type": "string", "maxLength": 60 },
+        "middleName": { "type": "string", "maxLength": 60 },
+        "surname": { "type": "string", "maxLength": 60 },
+        "fullName": { "type": "string", "maxLength": 150 },
+        "dateOfBirth": { "type": "string", "maxLength": 20 },
+        "gender": { "type": "string", "enum": ["Male", "Female"] },
+        "classId": { "type": "string", "maxLength": 50 },
+        "className": { "type": "string", "maxLength": 50 },
+        "guardianName": { "type": "string", "maxLength": 100 },
+        "guardianPhone": { "type": "string", "maxLength": 30 },
+        "guardianEmail": { "type": "string", "maxLength": 128 },
+        "guardianId": { "type": "string", "maxLength": 128 },
+        "address": { "type": "string", "maxLength": 300 },
+        "admissionDate": { "type": "string", "maxLength": 20 },
+        "passportPhoto": { "type": "string", "maxLength": 300000 },
+        "status": { "type": "string", "enum": ["Active", "Graduated", "Withdrawn", "Suspended"] },
+        "feeStatus": { "type": "string", "enum": ["Paid", "Partial", "Pending"] },
+        "stateOfOrigin": { "type": "string", "maxLength": 50 },
+        "termAverageScore": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["admissionNo", "firstName", "surname", "fullName", "dateOfBirth", "gender", "classId", "className", "guardianName", "guardianPhone", "address", "admissionDate", "status"]
+    },
+    "Teacher": {
+      "title": "Teacher",
+      "description": "Teaching staff record with qualifications, assigned subjects and classes",
+      "type": "object",
+      "properties": {
+        "staffId": { "type": "string", "maxLength": 30 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "gender": { "type": "string", "enum": ["Male", "Female"] },
+        "phone": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 128 },
+        "address": { "type": "string", "maxLength": 300 },
+        "qualifications": { "type": "string", "maxLength": 250 },
+        "subjects": {
+          "type": "array",
+          "description": "Subjects taught by the teacher"
+        },
+        "assignedClasses": {
+          "type": "array",
+          "description": "Classes assigned to the teacher"
+        },
+        "roleType": { "type": "string", "enum": ["Head of Department", "Form Teacher", "Subject Teacher", "Vice Principal"] },
+        "employmentDate": { "type": "string", "maxLength": 20 },
+        "employmentStatus": { "type": "string", "enum": ["Active", "On Leave", "Deactivated"] },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["staffId", "fullName", "phone", "email", "address", "qualifications", "employmentDate", "employmentStatus"]
+    },
+    "AcademicSession": {
+      "title": "AcademicSession",
+      "description": "School academic session with First Term, Second Term, and Third Term configuration",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 40 },
+        "isActive": { "type": "boolean" },
+        "startDate": { "type": "string", "maxLength": 20 },
+        "endDate": { "type": "string", "maxLength": 20 },
+        "terms": { "type": "array", "description": "First Term, Second Term, Third Term schedules" },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["name", "isActive", "startDate", "endDate", "terms"]
+    },
+    "SchoolClass": {
+      "title": "SchoolClass",
+      "description": "Class arm across Creche, Nursery, Primary, Junior Secondary, and Senior Secondary sections with assigned subjects",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 60 },
+        "section": { "type": "string", "enum": ["Creche", "Nursery", "Primary", "Junior Secondary", "Senior Secondary"] },
+        "level": { "type": "string", "maxLength": 40 },
+        "arm": { "type": "string", "maxLength": 80 },
+        "formTeacherName": { "type": "string", "maxLength": 120 },
+        "formTeacherId": { "type": "string", "maxLength": 128 },
+        "capacity": { "type": "number" },
+        "totalStudents": { "type": "number" },
+        "roomNumber": { "type": "string", "maxLength": 80 },
+        "subjects": { "type": "array", "description": "Subjects assigned to this class" },
+        "isActive": { "type": "boolean" },
+        "sortOrder": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["name", "section", "level", "arm", "capacity"]
+    },
+    "AcademicConfig": {
+      "title": "AcademicConfig",
+      "description": "Configurable assessment components, grading boundaries, and class ranking policy",
+      "type": "object",
+      "properties": {
+        "components": { "type": "array", "description": "Configurable CA and Examination components with max marks" },
+        "gradingScale": { "type": "array", "description": "Configurable grading boundaries and remarks" },
+        "rankingPolicy": { "type": "string", "enum": ["standard_competition", "dense"] },
+        "updatedBy": { "type": "string", "maxLength": 120 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["components", "gradingScale", "rankingPolicy"]
+    },
+    "SubjectTeacherAssignment": {
+      "title": "SubjectTeacherAssignment",
+      "description": "Assignment of a teacher to a specific subject and class",
+      "type": "object",
+      "properties": {
+        "className": { "type": "string", "maxLength": 60 },
+        "subject": { "type": "string", "maxLength": 100 },
+        "teacherId": { "type": "string", "maxLength": 128 },
+        "teacherName": { "type": "string", "maxLength": 120 },
+        "teacherEmail": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["className", "subject", "teacherId", "teacherName"]
+    },
+    "StudentResultReview": {
+      "title": "StudentResultReview",
+      "description": "Form Teacher, Head Teacher, and Principal comments and result approval status for a student in a term/session",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 150 },
+        "admissionNo": { "type": "string", "maxLength": 30 },
+        "guardianEmail": { "type": "string", "maxLength": 128 },
+        "className": { "type": "string", "maxLength": 60 },
+        "term": { "type": "string", "enum": ["First Term", "Second Term", "Third Term"] },
+        "session": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["Draft", "Submitted for Review", "Approved", "Returned for Correction"] },
+        "teacherComment": { "type": "string", "maxLength": 500 },
+        "teacherCommentBy": { "type": "string", "maxLength": 120 },
+        "teacherCommentAt": { "type": "string", "maxLength": 50 },
+        "headComment": { "type": "string", "maxLength": 500 },
+        "headCommentBy": { "type": "string", "maxLength": 120 },
+        "headCommentTitle": { "type": "string", "enum": ["Headmaster", "Headmistress"] },
+        "headCommentAt": { "type": "string", "maxLength": 50 },
+        "headSignature": { "type": "string", "maxLength": 350000 },
+        "principalComment": { "type": "string", "maxLength": 500 },
+        "principalCommentBy": { "type": "string", "maxLength": 120 },
+        "principalCommentAt": { "type": "string", "maxLength": 50 },
+        "principalSignature": { "type": "string", "maxLength": 350000 },
+        "reviewedBy": { "type": "string", "maxLength": 120 },
+        "reviewedAt": { "type": "string", "maxLength": 50 },
+        "approvedBy": { "type": "string", "maxLength": 120 },
+        "approvedAt": { "type": "string", "maxLength": 50 },
+        "returnNote": { "type": "string", "maxLength": 500 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["studentId", "studentName", "admissionNo", "className", "term", "session", "status"]
+    },
+    "AcademicRecord": {
+      "title": "AcademicRecord",
+      "description": "Subject continuous assessment and terminal examination grades",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 150 },
+        "admissionNo": { "type": "string", "maxLength": 30 },
+        "guardianEmail": { "type": "string", "maxLength": 128 },
+        "className": { "type": "string", "maxLength": 60 },
+        "subject": { "type": "string", "maxLength": 100 },
+        "term": { "type": "string", "enum": ["First Term", "Second Term", "Third Term"] },
+        "session": { "type": "string", "maxLength": 40 },
+        "ca1": { "type": "number" },
+        "ca2": { "type": "number" },
+        "exam": { "type": "number" },
+        "componentScores": { "type": "object" },
+        "total": { "type": "number" },
+        "maxTotal": { "type": "number" },
+        "percentage": { "type": "number" },
+        "grade": { "type": "string", "maxLength": 10 },
+        "remark": { "type": "string", "maxLength": 250 },
+        "enteredBy": { "type": "string", "maxLength": 120 },
+        "isApproved": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["studentId", "studentName", "admissionNo", "className", "subject", "term", "session", "total", "grade"]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Daily attendance mark for classroom registers with duplicate-safe composite keys and audit fields",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 150 },
+        "admissionNo": { "type": "string", "maxLength": 30 },
+        "guardianEmail": { "type": "string", "maxLength": 128 },
+        "classId": { "type": "string", "maxLength": 50 },
+        "className": { "type": "string", "maxLength": 50 },
+        "date": { "type": "string", "maxLength": 20 },
+        "term": { "type": "string", "enum": ["First Term", "Second Term", "Third Term"] },
+        "session": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["Present", "Absent", "Late", "Excused"] },
+        "remark": { "type": "string", "maxLength": 250 },
+        "markedBy": { "type": "string", "maxLength": 120 },
+        "markedByUid": { "type": "string", "maxLength": 128 },
+        "updatedBy": { "type": "string", "maxLength": 120 },
+        "updatedByUid": { "type": "string", "maxLength": 128 },
+        "correctionReason": { "type": "string", "maxLength": 250 },
+        "correctionHistory": {
+          "type": "array",
+          "description": "Audit log of attendance corrections (who, when, reason, old status, new status)"
+        },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["studentId", "studentName", "admissionNo", "classId", "className", "date", "term", "session", "status"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Official school circulars, notices, resumption dates, holidays, and exam announcements",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 150 },
+        "body": { "type": "string", "maxLength": 3000 },
+        "targetAudience": { "type": "string", "enum": ["All", "Teachers", "Parents", "Students", "Specific Classes"] },
+        "targetClasses": { "type": "array", "description": "Specific class names when targetAudience is Specific Classes" },
+        "priority": { "type": "string", "enum": ["Normal", "High", "Urgent"] },
+        "status": { "type": "string", "enum": ["Published", "Scheduled", "Archived"] },
+        "authorName": { "type": "string", "maxLength": 100 },
+        "authorRole": { "type": "string", "maxLength": 100 },
+        "term": { "type": "string", "enum": ["First Term", "Second Term", "Third Term"] },
+        "session": { "type": "string", "maxLength": 40 },
+        "date": { "type": "string", "maxLength": 20 },
+        "publishDate": { "type": "string", "maxLength": 20 },
+        "category": { "type": "string", "maxLength": 50 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["title", "body", "targetAudience", "priority", "authorName"]
+    },
+    "SchoolCalendarEvent": {
+      "title": "SchoolCalendarEvent",
+      "description": "Published school calendar dates including examination schedules, resumption dates, and holidays",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 150 },
+        "eventType": { "type": "string", "enum": ["Examination Schedule", "Resumption Date", "Holiday", "Mid-Term Break", "PTA Meeting", "School Event"] },
+        "session": { "type": "string", "maxLength": 40 },
+        "term": { "type": "string", "enum": ["First Term", "Second Term", "Third Term"] },
+        "startDate": { "type": "string", "maxLength": 20 },
+        "endDate": { "type": "string", "maxLength": 20 },
+        "targetAudience": { "type": "string", "enum": ["All", "Parents", "Specific Classes"] },
+        "targetClasses": { "type": "array", "description": "Optional specific class list" },
+        "description": { "type": "string", "maxLength": 1000 },
+        "publishedBy": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["title", "eventType", "session", "term", "startDate", "targetAudience", "publishedBy"]
+    },
+    "SchoolSetting": {
+      "title": "SchoolSetting",
+      "description": "General school profile, branding, calendar, and term configuration",
+      "type": "object",
+      "properties": {
+        "schoolName": { "type": "string", "maxLength": 150 },
+        "schoolTagline": { "type": "string", "maxLength": 200 },
+        "motto": { "type": "string", "maxLength": 200 },
+        "address": { "type": "string", "maxLength": 250 },
+        "state": { "type": "string", "maxLength": 80 },
+        "phone": { "type": "string", "maxLength": 80 },
+        "email": { "type": "string", "maxLength": 128 },
+        "website": { "type": "string", "maxLength": 128 },
+        "currentTerm": { "type": "string", "enum": ["First Term", "Second Term", "Third Term"] },
+        "currentSession": { "type": "string", "maxLength": 40 },
+        "termBegins": { "type": "string", "maxLength": 20 },
+        "termEnds": { "type": "string", "maxLength": 20 },
+        "nextTermResumption": { "type": "string", "maxLength": 20 },
+        "currency": { "type": "string", "maxLength": 10 },
+        "currencySymbol": { "type": "string", "maxLength": 5 },
+        "directorName": { "type": "string", "maxLength": 120 },
+        "principalName": { "type": "string", "maxLength": 120 },
+        "headTeacherTitle": { "type": "string", "enum": ["Headmaster", "Headmistress"] },
+        "headTeacherName": { "type": "string", "maxLength": 120 },
+        "headTeacherSignature": { "type": "string", "maxLength": 350000 },
+        "principalSignature": { "type": "string", "maxLength": 350000 },
+        "enableTeacherComment": { "type": "boolean" },
+        "enableHeadComment": { "type": "boolean" },
+        "enablePrincipalComment": { "type": "boolean" },
+        "logoDataUrl": { "type": "string", "maxLength": 350000 },
+        "logoUpdatedAt": { "type": "string", "maxLength": 50 },
+        "logoUpdatedBy": { "type": "string", "maxLength": 120 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["schoolName", "currentTerm", "currentSession", "currencySymbol"]
+    },
+    "PublicSchoolBranding": {
+      "title": "PublicSchoolBranding",
+      "description": "Publicly readable non-PII school branding (name, motto, base64 logoDataUrl) displayed on login and loading screens",
+      "type": "object",
+      "properties": {
+        "schoolName": { "type": "string", "maxLength": 150 },
+        "motto": { "type": "string", "maxLength": 200 },
+        "logoDataUrl": { "type": "string", "maxLength": 350000 },
+        "website": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["schoolName"]
+    },
+    "FeeCategory": {
+      "title": "FeeCategory",
+      "description": "Configurable school fee categories such as Tuition, Examination, Development, Uniforms, etc.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 300 },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["name", "isActive"]
+    },
+    "FeeScheduleItem": {
+      "title": "FeeScheduleItem",
+      "description": "Fee amount configured per class, term, academic session, and fee category in Nigerian Naira",
+      "type": "object",
+      "properties": {
+        "session": { "type": "string", "maxLength": 40 },
+        "term": { "type": "string", "enum": ["First Term", "Second Term", "Third Term"] },
+        "className": { "type": "string", "maxLength": 60 },
+        "categoryId": { "type": "string", "maxLength": 128 },
+        "categoryName": { "type": "string", "maxLength": 100 },
+        "amount": { "type": "number" },
+        "dueDate": { "type": "string", "maxLength": 20 },
+        "isMandatory": { "type": "boolean" },
+        "updatedBy": { "type": "string", "maxLength": 120 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["session", "term", "className", "categoryId", "categoryName", "amount", "dueDate"]
+    },
+    "StudentFee": {
+      "title": "StudentFee",
+      "description": "Applicable fee item assigned to a specific student with computed paid amount and outstanding balance",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 150 },
+        "admissionNo": { "type": "string", "maxLength": 30 },
+        "guardianEmail": { "type": "string", "maxLength": 128 },
+        "className": { "type": "string", "maxLength": 60 },
+        "session": { "type": "string", "maxLength": 40 },
+        "term": { "type": "string", "enum": ["First Term", "Second Term", "Third Term"] },
+        "categoryId": { "type": "string", "maxLength": 128 },
+        "categoryName": { "type": "string", "maxLength": 100 },
+        "amountDue": { "type": "number" },
+        "amountPaid": { "type": "number" },
+        "balance": { "type": "number" },
+        "status": { "type": "string", "enum": ["Paid", "Partial", "Pending"] },
+        "dueDate": { "type": "string", "maxLength": 20 },
+        "assignedBy": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["studentId", "studentName", "admissionNo", "className", "session", "term", "categoryId", "categoryName", "amountDue", "amountPaid", "balance", "status"]
+    },
+    "FeePayment": {
+      "title": "FeePayment",
+      "description": "Manually recorded payment transaction with unique receipt number and transaction reference",
+      "type": "object",
+      "properties": {
+        "receiptNo": { "type": "string", "maxLength": 40 },
+        "studentFeeId": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 150 },
+        "admissionNo": { "type": "string", "maxLength": 30 },
+        "guardianEmail": { "type": "string", "maxLength": 128 },
+        "className": { "type": "string", "maxLength": 60 },
+        "session": { "type": "string", "maxLength": 40 },
+        "term": { "type": "string", "enum": ["First Term", "Second Term", "Third Term"] },
+        "categoryId": { "type": "string", "maxLength": 128 },
+        "categoryName": { "type": "string", "maxLength": 100 },
+        "amount": { "type": "number" },
+        "paymentDate": { "type": "string", "maxLength": 20 },
+        "paymentMethod": { "type": "string", "enum": ["Bank Transfer", "POS", "Cash", "Cheque", "Bank Teller / Deposit"] },
+        "transactionRef": { "type": "string", "maxLength": 100 },
+        "notes": { "type": "string", "maxLength": 300 },
+        "recordedBy": { "type": "string", "maxLength": 120 },
+        "recordedByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["receiptNo", "studentFeeId", "studentId", "studentName", "admissionNo", "className", "session", "term", "categoryId", "categoryName", "amount", "paymentDate", "paymentMethod", "recordedBy", "recordedByUid"]
+    },
+    "TimetableSlot": {
+      "title": "TimetableSlot",
+      "description": "Class weekly timetable period slot",
+      "type": "object",
+      "properties": {
+        "day": { "type": "string", "enum": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"] },
+        "period": { "type": "number" },
+        "timeRange": { "type": "string", "maxLength": 40 },
+        "className": { "type": "string", "maxLength": 60 },
+        "subject": { "type": "string", "maxLength": 100 },
+        "teacherName": { "type": "string", "maxLength": 120 },
+        "room": { "type": "string", "maxLength": 60 },
+        "isBreak": { "type": "boolean" }
+      },
+      "required": ["day", "period", "timeRange", "className", "subject", "teacherName", "room"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles with role and RBAC permission fields"
+    },
+    "/staffInvites/{inviteId}": {
+      "schema": "StaffInvite",
+      "description": "Director-provisioned staff and parent pre-registration role invites"
+    },
+    "/students/{studentId}": {
+      "schema": "Student",
+      "description": "Student biodata, admission details, and academic status"
+    },
+    "/teachers/{teacherId}": {
+      "schema": "Teacher",
+      "description": "Teaching staff records, qualifications, and assignments"
+    },
+    "/academicSessions/{sessionId}": {
+      "schema": "AcademicSession",
+      "description": "Academic sessions and term schedules"
+    },
+    "/classes/{classId}": {
+      "schema": "SchoolClass",
+      "description": "Classes across Nursery, Primary, Junior Secondary, and Senior Secondary with assigned subjects"
+    },
+    "/academicConfig/{configId}": {
+      "schema": "AcademicConfig",
+      "description": "Assessment components, grading boundaries, and ranking policy"
+    },
+    "/subjectAssignments/{assignmentId}": {
+      "schema": "SubjectTeacherAssignment",
+      "description": "Subject-to-teacher-to-class mapping"
+    },
+    "/resultReviews/{reviewId}": {
+      "schema": "StudentResultReview",
+      "description": "Comments and approval workflow state for student terminal results"
+    },
+    "/academics/{recordId}": {
+      "schema": "AcademicRecord",
+      "description": "Terminal assessment scores"
+    },
+    "/attendance/{recordId}": {
+      "schema": "AttendanceRecord",
+      "description": "Daily attendance entries"
+    },
+    "/announcements/{announcementId}": {
+      "schema": "Announcement",
+      "description": "School wide and role-targeted announcements"
+    },
+    "/settings/{settingId}": {
+      "schema": "SchoolSetting",
+      "description": "School administration configuration"
+    },
+    "/branding/school": {
+      "schema": "PublicSchoolBranding",
+      "description": "Public school branding metadata (logo URL, school name, motto) synced by the Director"
+    },
+    "/feeCategories/{categoryId}": {
+      "schema": "FeeCategory",
+      "description": "Configurable school fee categories"
+    },
+    "/feeSchedules/{scheduleId}": {
+      "schema": "FeeScheduleItem",
+      "description": "Class, term, and session fee schedule items"
+    },
+    "/studentFees/{studentFeeId}": {
+      "schema": "StudentFee",
+      "description": "Assigned fee obligations per student"
+    },
+    "/feePayments/{paymentId}": {
+      "schema": "FeePayment",
+      "description": "Manually recorded payment transactions and receipts"
+    },
+    "/schoolCalendarEvents/{eventId}": {
+      "schema": "SchoolCalendarEvent",
+      "description": "Published school calendar dates, exam schedules, holidays, and resumption notices"
+    },
+    "/timetable/{slotId}": {
+      "schema": "TimetableSlot",
+      "description": "Class weekly timetable slots stored in Firestore"
+    }
+  }
+}

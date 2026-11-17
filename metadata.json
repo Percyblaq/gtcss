@@ -1,0 +1,6 @@
+{
+  "name": "SchoolDesk",
+  "description": "SchoolDesk - Modern School Management System for Nigerian Schools",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
