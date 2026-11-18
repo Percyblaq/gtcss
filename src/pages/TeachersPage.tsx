@@ -46,6 +46,7 @@ import {
   updateTeacherStatusInFirestore,
 } from '../services/schoolService';
 import { SchoolLogo } from '../components/common/SchoolLogo';
+import { FormDialog } from '../components/common/FormDialog';
 
 type TeacherFormState = {
   id?: string;
@@ -819,29 +820,40 @@ export const TeachersPage: React.FC = () => {
 
         {/* Register / Edit Teacher Modal */}
         {isFormModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#2A2A2E]/60 backdrop-blur-xs overflow-y-auto">
-            <div className="bg-white rounded-[10px] max-w-2xl w-full shadow-[0_12px_36px_rgba(42,42,46,0.18)] border border-[#E6DFD3] my-6 overflow-hidden">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-[#E6DFD3] bg-[#FAF8F4]">
-                <div>
-                  <h3 className="font-semibold text-base text-[#2A2A2E]">
-                    {isEditMode ? 'Edit Teacher Record' : 'Teacher Registration Form'}
-                  </h3>
-                  <p className="text-xs text-[#6E6A63] mt-0.5">
-                    {isEditMode
-                      ? `Updating faculty profile for ${formState.staffId}`
-                      : 'Register teaching staff with Staff ID, credentials, subjects & classes'}
-                  </p>
-                </div>
+          <FormDialog
+            title={isEditMode ? 'Edit Teacher Record' : 'Teacher Registration Form'}
+            subtitle={
+              isEditMode
+                ? `Updating faculty profile for ${formState.staffId}`
+                : 'Register teaching staff with Staff ID, credentials, subjects & classes'
+            }
+            onClose={() => setIsFormModalOpen(false)}
+            onSubmit={handleSaveTeacher}
+            closeAriaLabel="Close teacher form modal"
+            scrollResetKey={formState.id || 'new'}
+            footer={
+              <div className="flex items-center gap-2 ml-auto">
                 <button
                   type="button"
                   onClick={() => setIsFormModalOpen(false)}
-                  className="p-1.5 rounded-[8px] text-[#7F7A72] hover:text-[#2A2A2E] hover:bg-[#EFE9DF] transition-colors duration-150"
+                  className="px-4 py-2 rounded-[8px] bg-white border border-[#DDD5C7] hover:bg-[#FAF8F4] text-[#2A2A2E] font-medium transition-colors duration-150"
                 >
-                  <X className="w-5 h-5" />
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="px-5 py-2 rounded-[8px] bg-[#6B1020] hover:bg-[#540C19] text-white font-medium shadow-xs disabled:opacity-50 transition-colors duration-150"
+                >
+                  {isSaving
+                    ? 'Saving...'
+                    : isEditMode
+                    ? 'Save Changes'
+                    : 'Register Teacher'}
                 </button>
               </div>
-
-              <form onSubmit={handleSaveTeacher} className="p-6 space-y-4 text-xs max-h-[82vh] overflow-y-auto">
+            }
+          >
                 {formError && (
                   <div className="flex items-start gap-2 p-3 rounded-[8px] bg-[#FAF0F2] border border-[#E2C1C5] text-[#86222E] text-xs">
                     <AlertCircle className="w-4 h-4 text-[#86222E] shrink-0 mt-0.5" />
@@ -1115,29 +1127,7 @@ export const TeachersPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-2 pt-4 border-t border-[#EFE9DF]">
-                  <button
-                    type="button"
-                    onClick={() => setIsFormModalOpen(false)}
-                    className="px-4 py-2 rounded-[8px] bg-white border border-[#DDD5C7] hover:bg-[#FAF8F4] text-[#2A2A2E] font-medium transition-colors duration-150"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSaving}
-                    className="px-5 py-2 rounded-[8px] bg-[#6B1020] hover:bg-[#540C19] text-white font-medium shadow-xs disabled:opacity-50 transition-colors duration-150"
-                  >
-                    {isSaving
-                      ? 'Saving...'
-                      : isEditMode
-                      ? 'Save Changes'
-                      : 'Register Teacher'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
+          </FormDialog>
         )}
 
         {/* Dedicated Assign Subjects & Classes Modal */}

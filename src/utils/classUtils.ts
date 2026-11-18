@@ -27,7 +27,7 @@ export const SECTION_ORDER: Record<SchoolSection, number> = {
 export const LEVELS_BY_SECTION: Record<SchoolSection, string[]> = {
   Creche: ['Creche'],
   Nursery: ['Nursery 1', 'Nursery 2', 'Nursery 3'],
-  Primary: ['Primary 1', 'Primary 2', 'Primary 3', 'Primary 4', 'Primary 5', 'Primary 6'],
+  Primary: ['Primary 1', 'Primary 2', 'Primary 3', 'Primary 4', 'Primary 5'],
   'Junior Secondary': ['JSS 1', 'JSS 2', 'JSS 3'],
   'Senior Secondary': ['SS 1', 'SS 2', 'SS 3'],
 };
@@ -42,7 +42,6 @@ export const STANDARD_CLASS_NAMES: string[] = [
   'Primary 3',
   'Primary 4',
   'Primary 5',
-  'Primary 6',
   'JSS 1',
   'JSS 2',
   'JSS 3',
@@ -66,7 +65,6 @@ const STANDARD_CLASS_SECTION_MAP = new Map<string, SchoolSection>([
   ['primary 3', 'Primary'],
   ['primary 4', 'Primary'],
   ['primary 5', 'Primary'],
-  ['primary 6', 'Primary'],
   ['jss 1', 'Junior Secondary'],
   ['jss 2', 'Junior Secondary'],
   ['jss 3', 'Junior Secondary'],
@@ -74,6 +72,22 @@ const STANDARD_CLASS_SECTION_MAP = new Map<string, SchoolSection>([
   ['ss 2', 'Senior Secondary'],
   ['ss 3', 'Senior Secondary'],
 ]);
+
+export function isPrimary6ClassName(name?: string | null): boolean {
+  const normalized = String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  return normalized === 'primary 6' || normalized === 'pry 6';
+}
+
+export function isPrimary6Class(
+  cls?: Pick<SchoolClass, 'id' | 'name'> | null
+): boolean {
+  if (!cls) return false;
+  if (cls.id === 'cls-primary-6') return true;
+  return isPrimary6ClassName(cls.name);
+}
 
 export function inferSectionFromClassName(nameOrLevel: string): SchoolSection {
   const normalized = nameOrLevel.trim().toLowerCase();

@@ -235,21 +235,6 @@ export const DEFAULT_SCHOOL_CLASSES: SchoolClass[] = [
     isActive: true,
     sortOrder: 9,
   },
-  {
-    id: 'cls-primary-6',
-    name: 'Primary 6',
-    section: 'Primary',
-    level: 'Primary 6',
-    arm: 'Standard',
-    formTeacherName: 'Unassigned',
-    formTeacherId: '',
-    capacity: 30,
-    totalStudents: 0,
-    roomNumber: 'Primary Block, Room 203',
-    subjects: ['Mathematics', 'English Language', 'Basic Science', 'Social Studies', 'Quantitative Reasoning', 'Verbal Reasoning', 'Computer Studies / ICT', 'Civic Education'],
-    isActive: true,
-    sortOrder: 10,
-  },
 
   // 4. JUNIOR SECONDARY
   {
@@ -265,7 +250,7 @@ export const DEFAULT_SCHOOL_CLASSES: SchoolClass[] = [
     roomNumber: 'Junior Secondary Block, Room 101',
     subjects: ['Mathematics', 'English Language', 'Basic Science', 'Basic Technology', 'Computer Studies / ICT', 'Civic Education', 'Business Studies', 'Agricultural Science'],
     isActive: true,
-    sortOrder: 11,
+    sortOrder: 10,
   },
   {
     id: 'cls-jss-2',
@@ -280,7 +265,7 @@ export const DEFAULT_SCHOOL_CLASSES: SchoolClass[] = [
     roomNumber: 'Junior Secondary Block, Room 201',
     subjects: ['Mathematics', 'English Language', 'Basic Science', 'Basic Technology', 'Computer Studies / ICT', 'Civic Education', 'Business Studies', 'Agricultural Science'],
     isActive: true,
-    sortOrder: 12,
+    sortOrder: 11,
   },
   {
     id: 'cls-jss-3',
@@ -295,7 +280,7 @@ export const DEFAULT_SCHOOL_CLASSES: SchoolClass[] = [
     roomNumber: 'Junior Secondary Block, Room 301',
     subjects: ['Mathematics', 'English Language', 'Basic Science', 'Basic Technology', 'Business Studies', 'Literature-in-English', 'Civic Education', 'Computer Studies / ICT'],
     isActive: true,
-    sortOrder: 13,
+    sortOrder: 12,
   },
 
   // 5. SENIOR SECONDARY
@@ -312,7 +297,7 @@ export const DEFAULT_SCHOOL_CLASSES: SchoolClass[] = [
     roomNumber: 'Senior Secondary Block, Room 101',
     subjects: ['Mathematics', 'English Language', 'Physics', 'Chemistry', 'Biology', 'Economics', 'Government', 'Civic Education', 'Computer Studies / ICT'],
     isActive: true,
-    sortOrder: 14,
+    sortOrder: 13,
   },
   {
     id: 'cls-ss-2',
@@ -327,7 +312,7 @@ export const DEFAULT_SCHOOL_CLASSES: SchoolClass[] = [
     roomNumber: 'Senior Secondary Block, Room 201',
     subjects: ['Mathematics', 'English Language', 'Physics', 'Chemistry', 'Biology', 'Economics', 'Government', 'Further Mathematics', 'Civic Education', 'Computer Studies / ICT'],
     isActive: true,
-    sortOrder: 15,
+    sortOrder: 14,
   },
   {
     id: 'cls-ss-3',
@@ -342,7 +327,7 @@ export const DEFAULT_SCHOOL_CLASSES: SchoolClass[] = [
     roomNumber: 'Senior Secondary Block, Room 301',
     subjects: ['Mathematics', 'English Language', 'Physics', 'Chemistry', 'Biology', 'Economics', 'Government', 'Further Mathematics', 'Civic Education'],
     isActive: true,
-    sortOrder: 16,
+    sortOrder: 15,
   },
 ];
 
@@ -401,7 +386,6 @@ export const NIGERIAN_LEVELS_LIST: string[] = [
   'Primary 3',
   'Primary 4',
   'Primary 5',
-  'Primary 6',
   'JSS 1',
   'JSS 2',
   'JSS 3',

@@ -16,6 +16,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { ShieldAlert, ArrowLeft, RefreshCw } from 'lucide-react';
 import { UserRole } from './types';
 import { SchoolLogo } from './components/common/SchoolLogo';
+import { Primary6WarningModal } from './components/common/Primary6WarningModal';
 
 // Route permissions map
 const PAGE_PERMISSIONS: Record<string, UserRole[]> = {
@@ -81,6 +82,10 @@ function AppContent() {
     authNotice,
     clearAuthNotice,
     schoolSettings,
+    primary6Warning,
+    isPrimary6WarningModalOpen,
+    dismissPrimary6WarningModal,
+    refreshPrimary6Warning,
   } = useAuth();
 
   const academicsLeaveGuardRef = useRef<((proceed: () => void) => boolean) | null>(null);
@@ -189,6 +194,13 @@ function AppContent() {
           {activePage === 'settings' && <SettingsPage />}
         </>
       )}
+      <Primary6WarningModal
+        isOpen={isPrimary6WarningModalOpen}
+        summary={primary6Warning}
+        userRole={role}
+        onClose={dismissPrimary6WarningModal}
+        onRefreshSummary={refreshPrimary6Warning}
+      />
     </AppLayout>
   );
 }

@@ -46,6 +46,7 @@ import {
   updateStudentStatusInFirestore,
 } from '../services/schoolService';
 import { SchoolLogo } from '../components/common/SchoolLogo';
+import { FormDialog } from '../components/common/FormDialog';
 
 type StudentFormState = {
   id?: string;
@@ -1014,29 +1015,40 @@ export const StudentsPage: React.FC = () => {
 
         {/* Add / Edit Student Registration Modal */}
         {isFormModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#2A2A2E]/60 backdrop-blur-xs overflow-y-auto">
-            <div className="bg-white rounded-[10px] max-w-2xl w-full shadow-2xl border border-[#E6DFD3] my-6 overflow-hidden">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-[#E6DFD3] bg-[#FAF8F4]">
-                <div>
-                  <h3 className="font-semibold text-base text-[#2A2A2E]">
-                    {isEditMode ? 'Edit Student Information' : 'Student Registration Form'}
-                  </h3>
-                  <p className="text-xs text-[#6E6A63]">
-                    {isEditMode
-                      ? `Updating record for ${formState.admissionNo}`
-                      : 'Complete student biodata, guardian details & passport photograph'}
-                  </p>
-                </div>
+          <FormDialog
+            title={isEditMode ? 'Edit Student Information' : 'Student Registration Form'}
+            subtitle={
+              isEditMode
+                ? `Updating record for ${formState.admissionNo}`
+                : 'Complete student biodata, guardian details & passport photograph'
+            }
+            onClose={() => setIsFormModalOpen(false)}
+            onSubmit={handleSaveStudent}
+            closeAriaLabel="Close student form modal"
+            scrollResetKey={formState.id || 'new'}
+            footer={
+              <div className="flex items-center gap-2 ml-auto">
                 <button
                   type="button"
                   onClick={() => setIsFormModalOpen(false)}
-                  className="p-1.5 rounded-[8px] text-[#7F7A72] hover:text-[#2A2A2E] hover:bg-[#EFE9DF] transition-colors duration-150"
+                  className="px-4 py-2 rounded-[8px] bg-white hover:bg-[#FAF8F4] border border-[#DDD5C7] text-[#2A2A2E] font-medium transition-colors duration-150"
                 >
-                  <X className="w-5 h-5" />
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving || isCompressingPhoto}
+                  className="px-5 py-2 rounded-[8px] bg-[#6B1020] hover:bg-[#540C19] text-white font-medium transition-colors duration-150 disabled:opacity-50"
+                >
+                  {isSaving
+                    ? 'Saving...'
+                    : isEditMode
+                    ? 'Save Changes'
+                    : 'Complete Student Registration'}
                 </button>
               </div>
-
-              <form onSubmit={handleSaveStudent} className="p-6 space-y-5 text-xs max-h-[82vh] overflow-y-auto">
+            }
+          >
                 {formError && (
                   <div className="flex items-start gap-2 p-3 rounded-[10px] bg-[#FAF0F2] border border-[#E2C1C5] text-[#86222E] text-xs">
                     <AlertCircle className="w-4 h-4 text-[#86222E] shrink-0 mt-0.5" />
@@ -1352,29 +1364,7 @@ export const StudentsPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-2 pt-4 border-t border-[#EFE9DF]">
-                  <button
-                    type="button"
-                    onClick={() => setIsFormModalOpen(false)}
-                    className="px-4 py-2 rounded-[8px] bg-white hover:bg-[#FAF8F4] border border-[#DDD5C7] text-[#2A2A2E] font-medium transition-colors duration-150"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSaving || isCompressingPhoto}
-                    className="px-5 py-2 rounded-[8px] bg-[#6B1020] hover:bg-[#540C19] text-white font-medium transition-colors duration-150 disabled:opacity-50"
-                  >
-                    {isSaving
-                      ? 'Saving...'
-                      : isEditMode
-                      ? 'Save Changes'
-                      : 'Complete Student Registration'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
+          </FormDialog>
         )}
 
         {/* Promote Student(s) Modal */}

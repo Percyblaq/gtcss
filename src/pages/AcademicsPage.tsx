@@ -1361,7 +1361,7 @@ export const AcademicsPage: React.FC<AcademicsPageProps> = ({ onRegisterLeaveGua
       setSuccessMsg(
         res.addedCount > 0 || res.updatedCount > 0
           ? `Synchronized classes in Cloud Firestore (${res.addedCount} added, ${res.updatedCount} section grouping fixed, ${res.skippedCount} preserved).`
-          : 'All 16 standard classes (Creche – SS 3) are already saved in Cloud Firestore.'
+          : 'All 15 standard classes (Creche – SS 3) are already saved in Cloud Firestore.'
       );
     } catch (err) {
       setDataError(extractFriendlyError(err, 'Failed to sync standard school classes.'));
@@ -1513,7 +1513,7 @@ export const AcademicsPage: React.FC<AcademicsPageProps> = ({ onRegisterLeaveGua
           >
             <Database className="w-3.5 h-3.5" />
             {!classesSeeded
-              ? 'Initialize 16 School Classes (Creche – SS 3)'
+              ? 'Initialize 15 School Classes (Creche – SS 3)'
               : `Sync ${missingStandardCount} Missing Class${missingStandardCount > 1 ? 'es' : ''}`}
           </button>
         )}

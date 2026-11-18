@@ -18,6 +18,7 @@ import {
   Users,
   CalendarCheck,
   BarChart3,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -50,6 +51,7 @@ import {
   toggleClassActiveStatusInFirestore,
 } from '../services/academicService';
 import { computeAttendanceSummary, subscribeAttendance } from '../services/attendanceService';
+import { FormDialog } from '../components/common/FormDialog';
 import {
   doesStudentBelongToClass,
   getActiveClasses,
@@ -64,7 +66,7 @@ import {
 const SECTION_FILTERS: Array<'All' | SchoolSection> = ['All', ...SCHOOL_SECTIONS];
 
 export const ClassesPage: React.FC<{ onNavigate: (page: string) => void }> = ({ onNavigate }) => {
-  const { role, currentUser, firebaseUser } = useAuth();
+  const { role, currentUser, firebaseUser, primary6Warning, openPrimary6WarningModal } = useAuth();
   const isLiveFirestore = Boolean(firebaseUser);
   const isAdmin = role === 'director' || role === 'principal';
   const isDirector = role === 'director';
@@ -294,7 +296,7 @@ export const ClassesPage: React.FC<{ onNavigate: (page: string) => void }> = ({ 
     [visibleClasses]
   );
 
-  // Track active legacy classes in Firestore that are outside the 16 standard classes
+  // Track active legacy classes in Firestore that are outside the 15 standard classes
 
   const legacyClasses = useMemo(() => {
     if (!classesSeeded) return [];
@@ -480,7 +482,7 @@ export const ClassesPage: React.FC<{ onNavigate: (page: string) => void }> = ({ 
     try {
       const res = await syncStandardClassesToFirestore();
       if (res.addedCount === 0 && res.updatedCount === 0) {
-        setSuccessMsg('All 16 classes across Creche, Nursery, Primary, JSS & SS are already synchronized.');
+        setSuccessMsg('All 15 classes across Creche, Nursery, Primary, JSS & SS are already synchronized.');
       } else {
         setSuccessMsg(
           `Synchronized Cloud Firestore classes (${res.addedCount} added, ${res.updatedCount} section grouping fixed, ${res.skippedCount} preserved).`
@@ -575,7 +577,7 @@ export const ClassesPage: React.FC<{ onNavigate: (page: string) => void }> = ({ 
             Classes &amp; Arms Management
           </h1>
           <p className="text-xs text-[#6E6A63] mt-1">
-            Creche · Nursery (1–3) · Primary (1–6) · Junior Secondary (JSS 1–3) · Senior Secondary (SS 1–3)
+            Creche · Nursery (1–3) · Primary (1–5) · Junior Secondary (JSS 1–3) · Senior Secondary (SS 1–3)
           </p>
         </div>
 
@@ -589,7 +591,7 @@ export const ClassesPage: React.FC<{ onNavigate: (page: string) => void }> = ({ 
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isSaving ? 'animate-spin' : ''}`} />
               {!classesSeeded
-                ? 'Initialize 16 School Classes'
+                ? 'Initialize 15 School Classes'
                 : `Sync ${missingStandardCount} Missing Class${missingStandardCount > 1 ? 'es' : ''}`}
             </button>
           )}
@@ -629,6 +631,34 @@ export const ClassesPage: React.FC<{ onNavigate: (page: string) => void }> = ({ 
         </div>
       )}
 
+      {/* Primary 6 Linked Data Warning Banner */}
+      {isAdmin && primary6Warning?.needsDirectorAttention && (
+        <div className="bg-[#FBF5E8] border border-[#E3CFA6] rounded-[10px] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-[#9A6E1B] shrink-0 mt-0.5" />
+            <div>
+              <h2 className="text-xs font-semibold text-[#7D5A18]">
+                Primary 6 Has Existing Linked Records in Firestore
+              </h2>
+              <p className="text-[11px] text-[#7D5A18]/90 mt-0.5">
+                Primary 6 has been hidden from all class lists, but{' '}
+                {primary6Warning.studentsCount > 0
+                  ? `${primary6Warning.studentsCount} pupil(s) and/or linked records`
+                  : 'linked teacher, fee, attendance, or academic records'}{' '}
+                remain untouched until you review or move pupils.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={openPrimary6WarningModal}
+            className="px-3.5 py-2 rounded-[8px] bg-[#6B1020] hover:bg-[#540C19] text-white text-xs font-medium whitespace-nowrap shrink-0 transition-colors"
+          >
+            Review Primary 6 Data
+          </button>
+        </div>
+      )}
+
       {/* Legacy Classes Transition Notice (Non-Destructive) */}
       {isAdmin && legacyClasses.length > 0 && (
         <div className="bg-[#FBF5E8] border border-[#E3CFA6] rounded-[10px] p-4 space-y-2.5">
@@ -638,7 +668,7 @@ export const ClassesPage: React.FC<{ onNavigate: (page: string) => void }> = ({ 
                 Legacy Class Records Detected ({legacyClasses.length})
               </h2>
               <p className="text-[11px] text-[#7D5A18]/90 mt-0.5">
-                Historical academic and attendance records are preserved safely. Reassign any enrolled pupils to the updated 21-class structure or archive unused classes below.
+                Historical academic and attendance records are preserved safely. Reassign any enrolled pupils to the updated 15-class structure or archive unused classes below.
               </p>
             </div>
           </div>
@@ -1181,446 +1211,409 @@ export const ClassesPage: React.FC<{ onNavigate: (page: string) => void }> = ({ 
 
       {/* ==================== CREATE / MANUAL EDIT CLASS MODAL ==================== */}
       {isModalOpen && isAdmin && (
-        <div className="fixed inset-0 z-50 bg-[#2A2A2E]/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-white rounded-[10px] max-w-2xl w-full shadow-[0_12px_36px_rgba(42,42,46,0.18)] border border-[#E6DFD3] flex flex-col max-h-[88vh] overflow-hidden">
-            {/* Fixed Modal Header */}
-            <div className="shrink-0 flex items-start justify-between gap-3 border-b border-[#EFE9DF] px-4 sm:px-5 pt-3 pb-2.5">
-              <div className="min-w-0">
-                <h2 className="text-[15px] font-semibold leading-tight text-[#2A2A2E] truncate">
-                  {editingClassId ? `Edit Class — ${editingPreviousName}` : 'Add New School Class'}
-                </h2>
-                <p className="text-[11px] leading-snug text-[#6E6A63] mt-0.5">
-                  Configure class details, Form Teacher, and assigned subjects.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsModalOpen(false)}
-                className="p-1 rounded-[8px] text-[#7F7A72] hover:text-[#2A2A2E] hover:bg-[#FAF8F4] transition-colors duration-150 shrink-0"
-                aria-label="Close edit modal"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveClass} className="flex flex-col flex-1 min-h-0 text-xs">
-              {/* Scrollable Middle Content */}
-              <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-3 space-y-2.5">
-                {/* Row 1: Class Name & School Section */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block font-semibold text-[#2A2A2E] mb-1">Class Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formName}
-                      onChange={(e) => setFormName(e.target.value)}
-                      placeholder="e.g. Creche, Nursery 1, Primary 3, JSS 1A, SS 2A"
-                      className="w-full h-9 px-2.5 py-1.5 border border-[#DDD5C7] rounded-[8px] text-[#2A2A2E] focus:outline-none focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020]"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-[#2A2A2E] mb-1">
-                      School Section *
-                    </label>
-                    <select
-                      value={formSection}
-                      onChange={(e) => {
-                        const nextSec = e.target.value as SchoolSection;
-                        setFormSection(nextSec);
-                        const levels = LEVELS_BY_SECTION[nextSec];
-                        if (levels && !useCustomLevel && !levels.includes(formLevel)) {
-                          setFormLevel(levels[0]);
+        <FormDialog
+          title={editingClassId ? `Edit Class — ${editingPreviousName}` : 'Add New School Class'}
+          subtitle="Configure class details, Form Teacher, and assigned subjects."
+          onClose={() => setIsModalOpen(false)}
+          onSubmit={handleSaveClass}
+          closeAriaLabel="Close edit modal"
+          scrollResetKey={editingClassId || 'new'}
+          footer={
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                {editingClassId && isDirector && classesSeeded && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => {
+                        const target = classesList.find((c) => c.id === editingClassId);
+                        if (target) {
+                          setIsModalOpen(false);
+                          openMigrateModal(target);
                         }
                       }}
-                      className="w-full h-9 px-2.5 py-1.5 border border-[#DDD5C7] rounded-[8px] bg-white text-[#2A2A2E] focus:outline-none focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020]"
+                      className="px-3.5 py-2 rounded-[8px] border border-[#DDD5C7] bg-white hover:bg-[#FAF8F4] text-[#2A2A2E] font-medium flex items-center gap-1.5 transition-colors duration-150"
                     >
-                      {SCHOOL_SECTIONS.map((sec) => (
-                        <option key={sec} value={sec}>
-                          {SECTION_LABELS[sec]}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+                      <ArrowRightLeft className="w-3.5 h-3.5" /> Move Pupils
+                    </button>
 
-                {/* Row 2: Class Level, Arm / Stream, Maximum Capacity */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  <div>
-                    <label className="block font-semibold text-[#2A2A2E] mb-1">Class Level *</label>
-                    {!useCustomLevel ? (
-                      <select
-                        required
-                        value={NIGERIAN_LEVELS_LIST.includes(formLevel) ? formLevel : ''}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (val === '__custom__') {
-                            setUseCustomLevel(true);
-                            setFormLevel('');
-                          } else {
-                            setFormLevel(val);
-                          }
-                        }}
-                        className="w-full h-9 px-2.5 py-1.5 border border-[#DDD5C7] rounded-[8px] bg-white text-[#2A2A2E] focus:outline-none focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020]"
-                      >
-                        <option value="">-- Select Level --</option>
-                        {NIGERIAN_LEVELS_LIST.map((lvl) => (
-                          <option key={lvl} value={lvl}>
-                            {lvl}
-                          </option>
-                        ))}
-                        <option value="__custom__">+ Enter Custom Level...</option>
-                      </select>
-                    ) : (
-                      <div className="flex gap-1.5">
-                        <input
-                          type="text"
-                          required
-                          value={formLevel}
-                          onChange={(e) => setFormLevel(e.target.value)}
-                          placeholder="e.g. Pre-KG"
-                          className="w-full h-9 px-2.5 py-1.5 border border-[#DDD5C7] rounded-[8px] text-[#2A2A2E] focus:outline-none focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020]"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setUseCustomLevel(false);
-                            if (!NIGERIAN_LEVELS_LIST.includes(formLevel)) {
-                              setFormLevel(LEVELS_BY_SECTION[formSection]?.[0] || 'Primary 1');
-                            }
-                          }}
-                          className="h-9 px-2.5 rounded-[8px] bg-[#FAF8F4] border border-[#DDD5C7] hover:bg-[#EFE9DF] text-[#2A2A2E] font-medium shrink-0 transition-colors duration-150"
-                        >
-                          List
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-[#2A2A2E] mb-1">Arm / Stream</label>
-                    <input
-                      type="text"
-                      value={formArm}
-                      onChange={(e) => setFormArm(e.target.value)}
-                      placeholder="e.g. Standard, A, B"
-                      className="w-full h-9 px-2.5 py-1.5 border border-[#DDD5C7] rounded-[8px] text-[#2A2A2E] focus:outline-none focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020]"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-[#2A2A2E] mb-1">
-                      Maximum Capacity *
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min={1}
-                      max={500}
-                      value={formCapacity}
-                      onChange={(e) => setFormCapacity(Number(e.target.value) || 30)}
-                      className="w-full h-9 px-2.5 py-1.5 border border-[#DDD5C7] rounded-[8px] text-[#2A2A2E] tabular-nums focus:outline-none focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020]"
-                    />
-                  </div>
-                </div>
-
-                {/* Row 3: Classroom Location / Block & Active Class checkbox */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  <div className="sm:col-span-2">
-                    <label className="block font-semibold text-[#2A2A2E] mb-1">
-                      Classroom Location / Block *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={formRoom}
-                      onChange={(e) => setFormRoom(e.target.value)}
-                      placeholder="e.g. Primary Block, Room 101"
-                      className="w-full h-9 px-2.5 py-1.5 border border-[#DDD5C7] rounded-[8px] text-[#2A2A2E] focus:outline-none focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020]"
-                    />
-                  </div>
-
-                  <div className="flex flex-col justify-end">
-                    <label className="h-9 flex items-center gap-2 px-2.5 rounded-[8px] border border-[#DDD5C7] bg-[#FAF8F4] cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={formIsActive}
-                        onChange={(e) => setFormIsActive(e.target.checked)}
-                        className="rounded border-[#DDD5C7] text-[#6B1020] focus:ring-[#6B1020]"
-                      />
-                      <span className="font-medium text-[#2A2A2E] truncate">
-                        {formIsActive ? 'Active Class' : 'Archived / Inactive'}
-                      </span>
-                    </label>
-                  </div>
-                </div>
-
-                {/* Compact Form Teacher Management Box */}
-                <div className="p-2.5 rounded-[8px] bg-[#FAF8F4] border border-[#E6DFD3] space-y-1.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-baseline gap-x-2">
-                      <label className="font-semibold text-[#2A2A2E]">
-                        Form Teacher&apos;s Full Name
-                      </label>
-                      <span className="text-[11px] text-[#6E6A63]">
-                        Enter manually or pick from registered staff
-                      </span>
-                    </div>
-                    {formTeacherName && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormTeacherName('');
-                          setFormTeacherId('');
-                        }}
-                        className="text-[11px] font-medium text-[#6E6A63] hover:text-[#86222E] transition-colors duration-150"
-                      >
-                        Clear Teacher
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="block text-[11px] font-medium text-[#5E5B56] mb-1">
-                        Manual Full Name Entry
-                      </label>
-                      <input
-                        type="text"
-                        value={formTeacherName}
-                        onChange={(e) => handleManualTeacherNameChange(e.target.value)}
-                        placeholder="e.g. Mrs. Ngozi Okafor"
-                        className="w-full h-9 px-2.5 py-1.5 border border-[#DDD5C7] rounded-[8px] bg-white text-[#2A2A2E] focus:outline-none focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020]"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-medium text-[#5E5B56] mb-1">
-                        Pick Registered Teacher
-                      </label>
-                      <select
-                        value={formTeacherId}
-                        onChange={(e) => handleSelectTeacherFromDropdown(e.target.value)}
-                        className="w-full h-9 px-2.5 py-1.5 border border-[#DDD5C7] rounded-[8px] bg-white text-[#2A2A2E] focus:outline-none focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020]"
-                      >
-                        <option value="">-- Optional staff quick-pick --</option>
-                        {teachersList.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.fullName} ({t.staffId})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Compact Single-Line Auto-Expanding Notes Field */}
-                <div>
-                  <label className="block font-semibold text-[#2A2A2E] mb-1">
-                    Other Class Information / Notes (Optional)
-                  </label>
-                  <textarea
-                    rows={
-                      formNotes
-                        ? Math.min(
-                            4,
-                            Math.max(
-                              1,
-                              formNotes.split('\n').length,
-                              Math.ceil(formNotes.length / 78)
-                            )
-                          )
-                        : 1
-                    }
-                    maxLength={450}
-                    value={formNotes}
-                    onChange={(e) => setFormNotes(e.target.value)}
-                    placeholder="Optional classroom notes, wing details, or special stream instructions"
-                    className="w-full min-h-[36px] max-h-24 px-2.5 py-1.5 leading-5 border border-[#DDD5C7] rounded-[8px] text-[#2A2A2E] resize-none overflow-y-auto [field-sizing:content] focus:outline-none focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020]"
-                  />
-                </div>
-
-                {/* Compact Assigned Subjects Section */}
-                <div className="space-y-2 pt-2 border-t border-[#EFE9DF]">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <label className="font-semibold text-[#2A2A2E]">
-                      Assigned Subjects ({formSubjects.length})
-                    </label>
-
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <select
-                        aria-label="Add subject from curriculum"
-                        value={selectedQuickSubject}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (val && !formSubjects.includes(val)) {
-                            setFormSubjects((prev) => [...prev, val]);
-                          }
-                          setSelectedQuickSubject('');
-                        }}
-                        className="h-8 px-2.5 py-1 border border-[#DDD5C7] rounded-[8px] bg-white text-[11px] font-medium text-[#2A2A2E] focus:outline-none focus:border-[#6B1020]"
-                      >
-                        <option value="">+ Add from curriculum list...</option>
-                        {NIGERIAN_SUBJECTS_LIST.filter((s) => !formSubjects.includes(s)).map(
-                          (sub) => (
-                            <option key={sub} value={sub}>
-                              {sub}
-                            </option>
-                          )
-                        )}
-                      </select>
-
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="text"
-                          value={customSubject}
-                          onChange={(e) => setCustomSubject(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              handleAddCustomSubject();
-                            }
-                          }}
-                          placeholder="Custom subject..."
-                          className="h-8 px-2.5 py-1 border border-[#DDD5C7] rounded-[8px] text-[11px] w-36 text-[#2A2A2E] focus:outline-none focus:border-[#6B1020]"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleAddCustomSubject}
-                          className="h-8 px-2.5 rounded-[8px] bg-[#2A2A2E] hover:bg-[#1E1E22] text-white font-medium text-[11px] whitespace-nowrap transition-colors duration-150"
-                        >
-                          Add
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Editable List of Currently Assigned Subjects */}
-                  <div className="p-2 rounded-[8px] bg-[#FAF8F4] border border-[#E6DFD3] max-h-36 overflow-y-auto">
-                    {formSubjects.length === 0 ? (
-                      <p className="text-[11px] text-[#7F7A72] italic px-1 py-0.5">
-                        No subjects assigned yet. Use the selector or custom input above to add subjects.
-                      </p>
-                    ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                        {formSubjects.map((sub, idx) => (
-                          <div
-                            key={`${sub}-${idx}`}
-                            className="flex items-center justify-between gap-1.5 bg-white border border-[#E6DFD3] rounded-[6px] px-2.5 py-1 text-[11px]"
-                          >
-                            {editingSubjectIndex === idx ? (
-                              <div className="flex items-center gap-1 flex-1">
-                                <input
-                                  type="text"
-                                  value={editingSubjectValue}
-                                  onChange={(e) => setEditingSubjectValue(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      e.preventDefault();
-                                      handleCommitInlineSubjectEdit(idx);
-                                    }
-                                  }}
-                                  autoFocus
-                                  className="flex-1 px-2 py-0.5 border border-[#6B1020] rounded-[6px] text-[11px] text-[#2A2A2E] focus:outline-none"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => handleCommitInlineSubjectEdit(idx)}
-                                  className="text-[11px] font-semibold text-[#6B1020] px-1.5"
-                                >
-                                  Save
-                                </button>
-                              </div>
-                            ) : (
-                              <>
-                                <span className="font-medium text-[#2A2A2E] truncate">{sub}</span>
-                                <div className="flex items-center gap-0.5 shrink-0">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setEditingSubjectIndex(idx);
-                                      setEditingSubjectValue(sub);
-                                    }}
-                                    className="p-0.5 text-[#7F7A72] hover:text-[#6B1020] transition-colors duration-150"
-                                    title="Rename subject"
-                                  >
-                                    <Pencil className="w-3 h-3" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveSubject(sub)}
-                                    className="p-0.5 text-[#7F7A72] hover:text-[#86222E] transition-colors duration-150"
-                                    title="Remove subject from this class"
-                                  >
-                                    <X className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => {
+                        const target = classesList.find((c) => c.id === editingClassId);
+                        if (target) handleSafeDelete(target);
+                      }}
+                      className="px-3.5 py-2 rounded-[8px] border border-[#E2C1C5] bg-[#FAF0F2] hover:bg-[#F3E1E5] text-[#86222E] font-medium flex items-center gap-1.5 transition-colors duration-150"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Delete Class
+                    </button>
+                  </>
+                )}
               </div>
 
-              {/* Fixed Modal Footer Controls */}
-              <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-2.5 border-t border-[#EFE9DF] bg-[#FAF8F4]/60">
-                <div className="flex flex-wrap items-center gap-2">
-                  {editingClassId && isDirector && classesSeeded && (
-                    <>
-                      <button
-                        type="button"
-                        disabled={isSaving}
-                        onClick={() => {
-                          const target = classesList.find((c) => c.id === editingClassId);
-                          if (target) {
-                            setIsModalOpen(false);
-                            openMigrateModal(target);
-                          }
-                        }}
-                        className="h-9 px-3 rounded-[8px] border border-[#DDD5C7] bg-white hover:bg-[#FAF8F4] text-[#2A2A2E] font-medium flex items-center gap-1.5 transition-colors duration-150"
-                      >
-                        <ArrowRightLeft className="w-3.5 h-3.5" /> Move Pupils
-                      </button>
+              <div className="flex items-center gap-2 ml-auto">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="px-4 py-2 rounded-[8px] bg-white hover:bg-[#FAF8F4] border border-[#DDD5C7] text-[#2A2A2E] font-medium transition-colors duration-150"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="px-5 py-2 rounded-[8px] bg-[#6B1020] hover:bg-[#540C19] text-white font-medium transition-colors duration-150 disabled:opacity-50"
+                >
+                  {isSaving ? 'Saving...' : editingClassId ? 'Save Class Changes' : 'Create Class'}
+                </button>
+              </div>
+            </>
+          }
+        >
+          {/* Row 1: Class Name & School Section */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block font-medium text-[#5E5B56] mb-1">Class Name *</label>
+              <input
+                type="text"
+                required
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                placeholder="e.g. Creche, Nursery 1, Primary 3, JSS 1A, SS 2A"
+                className="w-full px-3 py-2 border border-[#DDD5C7] rounded-[8px] bg-white text-[#2A2A2E] focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020] focus:outline-none"
+              />
+            </div>
 
-                      <button
-                        type="button"
-                        disabled={isSaving}
-                        onClick={() => {
-                          const target = classesList.find((c) => c.id === editingClassId);
-                          if (target) handleSafeDelete(target);
-                        }}
-                        className="h-9 px-3 rounded-[8px] border border-[#E2C1C5] bg-[#FAF0F2] hover:bg-[#F3E1E5] text-[#86222E] font-medium flex items-center gap-1.5 transition-colors duration-150"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" /> Delete Class
-                      </button>
-                    </>
-                  )}
-                </div>
+            <div>
+              <label className="block font-medium text-[#5E5B56] mb-1">School Section *</label>
+              <select
+                value={formSection}
+                onChange={(e) => {
+                  const nextSec = e.target.value as SchoolSection;
+                  setFormSection(nextSec);
+                  const levels = LEVELS_BY_SECTION[nextSec];
+                  if (levels && !useCustomLevel && !levels.includes(formLevel)) {
+                    setFormLevel(levels[0]);
+                  }
+                }}
+                className="w-full px-3 py-2 border border-[#DDD5C7] rounded-[8px] bg-white text-[#2A2A2E] focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020] focus:outline-none"
+              >
+                {SCHOOL_SECTIONS.map((sec) => (
+                  <option key={sec} value={sec}>
+                    {SECTION_LABELS[sec]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
 
-                <div className="flex items-center gap-2 ml-auto">
+          {/* Row 2: Class Level, Arm / Stream, Maximum Capacity */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block font-medium text-[#5E5B56] mb-1">Class Level *</label>
+              {!useCustomLevel ? (
+                <select
+                  required
+                  value={NIGERIAN_LEVELS_LIST.includes(formLevel) ? formLevel : ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '__custom__') {
+                      setUseCustomLevel(true);
+                      setFormLevel('');
+                    } else {
+                      setFormLevel(val);
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-[#DDD5C7] rounded-[8px] bg-white text-[#2A2A2E] focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020] focus:outline-none"
+                >
+                  <option value="">-- Select Level --</option>
+                  {NIGERIAN_LEVELS_LIST.map((lvl) => (
+                    <option key={lvl} value={lvl}>
+                      {lvl}
+                    </option>
+                  ))}
+                  <option value="__custom__">+ Enter Custom Level...</option>
+                </select>
+              ) : (
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    required
+                    value={formLevel}
+                    onChange={(e) => setFormLevel(e.target.value)}
+                    placeholder="e.g. Pre-KG"
+                    className="w-full px-3 py-2 border border-[#DDD5C7] rounded-[8px] bg-white text-[#2A2A2E] focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020] focus:outline-none"
+                  />
                   <button
                     type="button"
-                    onClick={() => setIsModalOpen(false)}
-                    className="h-9 px-3.5 rounded-[8px] bg-white border border-[#DDD5C7] hover:bg-[#FAF8F4] text-[#2A2A2E] font-medium transition-colors duration-150"
+                    onClick={() => {
+                      setUseCustomLevel(false);
+                      if (!NIGERIAN_LEVELS_LIST.includes(formLevel)) {
+                        setFormLevel(LEVELS_BY_SECTION[formSection]?.[0] || 'Primary 1');
+                      }
+                    }}
+                    className="px-3 py-2 rounded-[8px] bg-[#FAF8F4] border border-[#DDD5C7] hover:bg-[#EFE9DF] text-[#2A2A2E] font-medium shrink-0 transition-colors duration-150"
                   >
-                    Cancel
+                    List
                   </button>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="block font-medium text-[#5E5B56] mb-1">Arm / Stream</label>
+              <input
+                type="text"
+                value={formArm}
+                onChange={(e) => setFormArm(e.target.value)}
+                placeholder="e.g. Standard, A, B"
+                className="w-full px-3 py-2 border border-[#DDD5C7] rounded-[8px] bg-white text-[#2A2A2E] focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020] focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block font-medium text-[#5E5B56] mb-1">Maximum Capacity *</label>
+              <input
+                type="number"
+                required
+                min={1}
+                max={500}
+                value={formCapacity}
+                onChange={(e) => setFormCapacity(Number(e.target.value) || 30)}
+                className="w-full px-3 py-2 border border-[#DDD5C7] rounded-[8px] bg-white text-[#2A2A2E] tabular-nums focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020] focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Row 3: Classroom Location / Block & Active Class checkbox */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-2">
+              <label className="block font-medium text-[#5E5B56] mb-1">
+                Classroom Location / Block *
+              </label>
+              <input
+                type="text"
+                required
+                value={formRoom}
+                onChange={(e) => setFormRoom(e.target.value)}
+                placeholder="e.g. Primary Block, Room 101"
+                className="w-full px-3 py-2 border border-[#DDD5C7] rounded-[8px] bg-white text-[#2A2A2E] focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020] focus:outline-none"
+              />
+            </div>
+
+            <div className="flex flex-col justify-end">
+              <label className="flex items-center gap-2 px-3 py-2 rounded-[8px] border border-[#DDD5C7] bg-[#FAF8F4] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formIsActive}
+                  onChange={(e) => setFormIsActive(e.target.checked)}
+                  className="rounded border-[#DDD5C7] text-[#6B1020] focus:ring-[#6B1020]"
+                />
+                <span className="font-medium text-[#2A2A2E] truncate">
+                  {formIsActive ? 'Active Class' : 'Archived / Inactive'}
+                </span>
+              </label>
+            </div>
+          </div>
+
+          {/* Form Teacher Management Box */}
+          <div className="bg-[#FAF8F4] p-4 rounded-[10px] border border-[#E6DFD3] space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <label className="font-semibold text-[#2A2A2E]">
+                  Form Teacher&apos;s Full Name
+                </label>
+                <span className="text-[11px] text-[#6E6A63]">
+                  Enter manually or pick from registered staff
+                </span>
+              </div>
+              {formTeacherName && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormTeacherName('');
+                    setFormTeacherId('');
+                  }}
+                  className="text-[11px] font-medium text-[#6E6A63] hover:text-[#86222E] transition-colors duration-150"
+                >
+                  Clear Teacher
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-medium text-[#5E5B56] mb-1">
+                  Manual Full Name Entry
+                </label>
+                <input
+                  type="text"
+                  value={formTeacherName}
+                  onChange={(e) => handleManualTeacherNameChange(e.target.value)}
+                  placeholder="e.g. Mrs. Ngozi Okafor"
+                  className="w-full px-3 py-2 border border-[#DDD5C7] rounded-[8px] bg-white text-[#2A2A2E] focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020] focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-[#5E5B56] mb-1">
+                  Pick Registered Teacher
+                </label>
+                <select
+                  value={formTeacherId}
+                  onChange={(e) => handleSelectTeacherFromDropdown(e.target.value)}
+                  className="w-full px-3 py-2 border border-[#DDD5C7] rounded-[8px] bg-white text-[#2A2A2E] focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020] focus:outline-none"
+                >
+                  <option value="">-- Optional staff quick-pick --</option>
+                  {teachersList.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.fullName} ({t.staffId})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Notes Field */}
+          <div>
+            <label className="block font-medium text-[#5E5B56] mb-1">
+              Other Class Information / Notes (Optional)
+            </label>
+            <textarea
+              rows={2}
+              maxLength={450}
+              value={formNotes}
+              onChange={(e) => setFormNotes(e.target.value)}
+              placeholder="Optional classroom notes, wing details, or special stream instructions"
+              className="w-full px-3 py-2 border border-[#DDD5C7] rounded-[8px] bg-white text-[#2A2A2E] resize-y focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020] focus:outline-none"
+            />
+          </div>
+
+          {/* Assigned Subjects Section */}
+          <div className="pt-3 border-t border-[#EFE9DF] space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="font-semibold text-[11px] uppercase tracking-wider text-[#5E5B56]">
+                Assigned Subjects ({formSubjects.length})
+              </h4>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  aria-label="Add subject from curriculum"
+                  value={selectedQuickSubject}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val && !formSubjects.includes(val)) {
+                      setFormSubjects((prev) => [...prev, val]);
+                    }
+                    setSelectedQuickSubject('');
+                  }}
+                  className="px-3 py-2 border border-[#DDD5C7] rounded-[8px] bg-white font-medium text-[#2A2A2E] focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020] focus:outline-none"
+                >
+                  <option value="">+ Add from curriculum list...</option>
+                  {NIGERIAN_SUBJECTS_LIST.filter((s) => !formSubjects.includes(s)).map((sub) => (
+                    <option key={sub} value={sub}>
+                      {sub}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={customSubject}
+                    onChange={(e) => setCustomSubject(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddCustomSubject();
+                      }
+                    }}
+                    placeholder="Custom subject..."
+                    className="px-3 py-2 border border-[#DDD5C7] rounded-[8px] bg-white w-36 text-[#2A2A2E] focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020] focus:outline-none"
+                  />
                   <button
-                    type="submit"
-                    disabled={isSaving}
-                    className="h-9 px-4 rounded-[8px] bg-[#6B1020] hover:bg-[#540C19] text-white font-medium shadow-xs disabled:opacity-50 transition-colors duration-150"
+                    type="button"
+                    onClick={handleAddCustomSubject}
+                    className="px-3.5 py-2 rounded-[8px] bg-[#2A2A2E] hover:bg-[#1E1E22] text-white font-medium whitespace-nowrap transition-colors duration-150"
                   >
-                    {isSaving ? 'Saving...' : editingClassId ? 'Save Class Changes' : 'Create Class'}
+                    Add
                   </button>
                 </div>
               </div>
-            </form>
+            </div>
+
+            {/* Editable List of Currently Assigned Subjects */}
+            <div className="p-3 rounded-[10px] bg-[#FAF8F4] border border-[#E6DFD3] max-h-44 overflow-y-auto">
+              {formSubjects.length === 0 ? (
+                <p className="text-[11px] text-[#7F7A72] italic px-1 py-0.5">
+                  No subjects assigned yet. Use the selector or custom input above to add subjects.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {formSubjects.map((sub, idx) => (
+                    <div
+                      key={`${sub}-${idx}`}
+                      className="flex items-center justify-between gap-2 bg-white border border-[#E6DFD3] rounded-[8px] px-3 py-1.5"
+                    >
+                      {editingSubjectIndex === idx ? (
+                        <div className="flex items-center gap-1.5 flex-1">
+                          <input
+                            type="text"
+                            value={editingSubjectValue}
+                            onChange={(e) => setEditingSubjectValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleCommitInlineSubjectEdit(idx);
+                              }
+                            }}
+                            autoFocus
+                            className="flex-1 px-2 py-1 border border-[#6B1020] rounded-[6px] text-[#2A2A2E] focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleCommitInlineSubjectEdit(idx)}
+                            className="text-[11px] font-semibold text-[#6B1020] px-1.5"
+                          >
+                            Save
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <span className="font-medium text-[#2A2A2E] truncate">{sub}</span>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingSubjectIndex(idx);
+                                setEditingSubjectValue(sub);
+                              }}
+                              className="p-1 text-[#7F7A72] hover:text-[#6B1020] transition-colors duration-150"
+                              title="Rename subject"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveSubject(sub)}
+                              className="p-1 text-[#7F7A72] hover:text-[#86222E] transition-colors duration-150"
+                              title="Remove subject from this class"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        </FormDialog>
       )}
 
       {/* ==================== SAFE PUPIL MIGRATION MODAL ==================== */}

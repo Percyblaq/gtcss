@@ -42,7 +42,12 @@ import {
 } from '../data/sampleData';
 import { extractFriendlyError } from './schoolService';
 import { computeAttendanceSummary, AttendanceSummaryStats } from './attendanceService';
-import { resolveClassSection, sortClassesByStructure } from '../utils/classUtils';
+import {
+  isPrimary6Class,
+  isPrimary6ClassName,
+  resolveClassSection,
+  sortClassesByStructure,
+} from '../utils/classUtils';
 
 function stripUndefined<T extends Record<string, any>>(obj: T): Record<string, any> {
   const cleaned: Record<string, any> = {};
@@ -162,13 +167,15 @@ export function subscribeClasses(
         );
         return;
       }
-      const firestoreList = snap.docs.map((d) => {
-        const raw = { ...(d.data() as SchoolClass), id: d.id };
-        return {
-          ...raw,
-          section: resolveClassSection(raw),
-        };
-      });
+      const firestoreList = snap.docs
+        .map((d) => {
+          const raw = { ...(d.data() as SchoolClass), id: d.id };
+          return {
+            ...raw,
+            section: resolveClassSection(raw),
+          };
+        })
+        .filter((cls) => !isPrimary6Class(cls));
       const existingIds = new Set(firestoreList.map((c) => c.id));
       const existingNames = new Set(firestoreList.map((c) => c.name.trim().toLowerCase()));
       const missingDefaults = DEFAULT_SCHOOL_CLASSES.filter(
@@ -698,6 +705,350 @@ export async function migrateClassStudentsInFirestore(params: {
     return { migratedCount: refs.length };
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `classes/${sourceClass.id}`);
+  }
+}
+
+export interface Primary6DependencySummary {
+  hasClassDoc: boolean;
+  classDocs: SchoolClass[];
+  studentsCount: number;
+  academicsCount: number;
+  resultReviewsCount: number;
+  attendanceCount: number;
+  feesCount: number;
+  feeSchedulesCount: number;
+  subjectAssignmentsCount: number;
+  teachersCount: number;
+  staffInvitesCount: number;
+  timetableCount: number;
+  hasFormTeacher: boolean;
+  formTeacherNames: string[];
+  affectedTeacherNames: string[];
+  hasAnyAffectedData: boolean;
+  needsDirectorAttention: boolean;
+}
+
+export async function inspectPrimary6Dependencies(): Promise<Primary6DependencySummary> {
+  const classesSnap = await getDocs(collection(db, 'classes'));
+  const classDocs = classesSnap.docs
+    .map((d) => ({ ...(d.data() as SchoolClass), id: d.id }))
+    .filter((c) => isPrimary6Class(c));
+
+  const classNamesToMatch = Array.from(
+    new Set(['Primary 6', ...classDocs.map((c) => c.name.trim()).filter(Boolean)])
+  );
+  const classIdsToMatch = Array.from(
+    new Set(['cls-primary-6', ...classDocs.map((c) => c.id)])
+  );
+
+  const safeQuery = async (promise: Promise<Awaited<ReturnType<typeof getDocs>>>) => {
+    try {
+      return await promise;
+    } catch {
+      return null;
+    }
+  };
+
+  const [
+    stuByNameSnaps,
+    stuByIdSnaps,
+    acadSnap,
+    revSnap,
+    attSnap,
+    feeSnap,
+    schedSnap,
+    subjSnap,
+    ttSnap,
+    teachersSnap,
+    usersSnap,
+    invitesSnap,
+  ] = await Promise.all([
+    Promise.all(
+      classNamesToMatch.map((name) =>
+        safeQuery(getDocs(query(collection(db, 'students'), where('className', '==', name))))
+      )
+    ),
+    Promise.all(
+      classIdsToMatch.map((id) =>
+        safeQuery(getDocs(query(collection(db, 'students'), where('classId', '==', id))))
+      )
+    ),
+    safeQuery(
+      getDocs(query(collection(db, 'academics'), where('className', 'in', classNamesToMatch)))
+    ),
+    safeQuery(
+      getDocs(query(collection(db, 'resultReviews'), where('className', 'in', classNamesToMatch)))
+    ),
+    safeQuery(
+      getDocs(query(collection(db, 'attendance'), where('className', 'in', classNamesToMatch)))
+    ),
+    safeQuery(
+      getDocs(query(collection(db, 'studentFees'), where('className', 'in', classNamesToMatch)))
+    ),
+    safeQuery(
+      getDocs(query(collection(db, 'feeSchedules'), where('className', 'in', classNamesToMatch)))
+    ),
+    safeQuery(
+      getDocs(
+        query(collection(db, 'subjectAssignments'), where('className', 'in', classNamesToMatch))
+      )
+    ),
+    safeQuery(
+      getDocs(query(collection(db, 'timetable'), where('className', 'in', classNamesToMatch)))
+    ),
+    safeQuery(getDocs(collection(db, 'teachers'))),
+    safeQuery(getDocs(collection(db, 'users'))),
+    safeQuery(getDocs(collection(db, 'staffInvites'))),
+  ]);
+
+  const studentIds = new Set<string>();
+  stuByNameSnaps.forEach((snap) => snap?.forEach((d) => studentIds.add(d.id)));
+  stuByIdSnaps.forEach((snap) => snap?.forEach((d) => studentIds.add(d.id)));
+
+  const formTeacherNames = Array.from(
+    new Set(
+      classDocs
+        .map((c) => (c.formTeacherName || '').trim())
+        .filter((name) => name && name.toLowerCase() !== 'unassigned')
+    )
+  );
+  const hasFormTeacher = formTeacherNames.length > 0;
+
+  const affectedTeacherKeys = new Set<string>();
+  const affectedTeacherNamesSet = new Set<string>(formTeacherNames);
+
+  teachersSnap?.forEach((d) => {
+    const t = d.data() as Teacher;
+    if ((t.assignedClasses || []).some((clsName) => isPrimary6ClassName(clsName))) {
+      affectedTeacherKeys.add(`teacher:${d.id}`);
+      if (t.fullName) affectedTeacherNamesSet.add(t.fullName);
+    }
+  });
+
+  usersSnap?.forEach((d) => {
+    const u = d.data() as UserProfile;
+    if ((u.assignedClasses || []).some((clsName) => isPrimary6ClassName(clsName))) {
+      affectedTeacherKeys.add(`user:${d.id}`);
+      if (u.displayName) affectedTeacherNamesSet.add(u.displayName);
+    }
+  });
+
+  let staffInvitesCount = 0;
+  invitesSnap?.forEach((d) => {
+    const inv = d.data() as { assignedClasses?: string[]; displayName?: string };
+    if ((inv.assignedClasses || []).some((clsName) => isPrimary6ClassName(clsName))) {
+      staffInvitesCount += 1;
+      if (inv.displayName) affectedTeacherNamesSet.add(inv.displayName);
+    }
+  });
+
+  const subjectAssignmentsCount = subjSnap?.size ?? 0;
+  subjSnap?.forEach((d) => {
+    const asgn = d.data() as SubjectTeacherAssignment;
+    if (asgn.teacherName) affectedTeacherNamesSet.add(asgn.teacherName);
+  });
+
+  const studentsCount = studentIds.size;
+  const academicsCount = acadSnap?.size ?? 0;
+  const resultReviewsCount = revSnap?.size ?? 0;
+  const attendanceCount = attSnap?.size ?? 0;
+  const feesCount = feeSnap?.size ?? 0;
+  const feeSchedulesCount = schedSnap?.size ?? 0;
+  const timetableCount = ttSnap?.size ?? 0;
+  const teachersCount = affectedTeacherKeys.size;
+
+  const hasAnyAffectedData =
+    studentsCount > 0 ||
+    academicsCount > 0 ||
+    resultReviewsCount > 0 ||
+    attendanceCount > 0 ||
+    feesCount > 0 ||
+    feeSchedulesCount > 0 ||
+    subjectAssignmentsCount > 0 ||
+    teachersCount > 0 ||
+    staffInvitesCount > 0 ||
+    timetableCount > 0 ||
+    hasFormTeacher;
+
+  const needsDirectorAttention = classDocs.length > 0
+    ? hasAnyAffectedData
+    : studentsCount > 0 ||
+      teachersCount > 0 ||
+      subjectAssignmentsCount > 0 ||
+      staffInvitesCount > 0 ||
+      timetableCount > 0 ||
+      feeSchedulesCount > 0;
+
+  return {
+    hasClassDoc: classDocs.length > 0,
+    classDocs,
+    studentsCount,
+    academicsCount,
+    resultReviewsCount,
+    attendanceCount,
+    feesCount,
+    feeSchedulesCount,
+    subjectAssignmentsCount,
+    teachersCount,
+    staffInvitesCount,
+    timetableCount,
+    hasFormTeacher,
+    formTeacherNames,
+    affectedTeacherNames: Array.from(affectedTeacherNamesSet),
+    hasAnyAffectedData,
+    needsDirectorAttention,
+  };
+}
+
+export async function reconcilePrimary6Removal(
+  canDeleteEmptyClass: boolean
+): Promise<Primary6DependencySummary> {
+  const summary = await inspectPrimary6Dependencies();
+
+  // Only delete Primary 6 automatically when it has zero linked records of any kind.
+  if (summary.hasClassDoc && !summary.hasAnyAffectedData && canDeleteEmptyClass) {
+    await Promise.all(
+      summary.classDocs.map((clsDoc) => deleteDoc(doc(db, 'classes', clsDoc.id)))
+    );
+    return {
+      ...summary,
+      hasClassDoc: false,
+      classDocs: [],
+      needsDirectorAttention: false,
+    };
+  }
+
+  return summary;
+}
+
+export async function migratePrimary6StudentsToClass(
+  targetClass: SchoolClass
+): Promise<{ migratedCount: number }> {
+  if (isPrimary6Class(targetClass)) {
+    throw new Error('Cannot move pupils into Primary 6.');
+  }
+
+  const classesSnap = await getDocs(collection(db, 'classes'));
+  const classDocs = classesSnap.docs
+    .map((d) => ({ ...(d.data() as SchoolClass), id: d.id }))
+    .filter((c) => isPrimary6Class(c));
+
+  const classNamesToMatch = Array.from(
+    new Set(['Primary 6', ...classDocs.map((c) => c.name.trim()).filter(Boolean)])
+  );
+  const classIdsToMatch = Array.from(
+    new Set(['cls-primary-6', ...classDocs.map((c) => c.id)])
+  );
+
+  const [byNameSnaps, byIdSnaps] = await Promise.all([
+    Promise.all(
+      classNamesToMatch.map((name) =>
+        getDocs(query(collection(db, 'students'), where('className', '==', name)))
+      )
+    ),
+    Promise.all(
+      classIdsToMatch.map((id) =>
+        getDocs(query(collection(db, 'students'), where('classId', '==', id)))
+      )
+    ),
+  ]);
+
+  const seen = new Map<string, ReturnType<typeof doc>>();
+  byNameSnaps.forEach((snap) => snap.forEach((d) => seen.set(d.id, d.ref)));
+  byIdSnaps.forEach((snap) => snap.forEach((d) => seen.set(d.id, d.ref)));
+
+  const now = new Date().toISOString();
+  const refs = Array.from(seen.values());
+  const CHUNK_SIZE = 400;
+
+  for (let i = 0; i < refs.length; i += CHUNK_SIZE) {
+    const batch = writeBatch(db);
+    refs.slice(i, i + CHUNK_SIZE).forEach((ref) => {
+      batch.update(ref, {
+        classId: targetClass.id,
+        className: targetClass.name,
+        updatedAt: now,
+      });
+    });
+    await batch.commit();
+  }
+
+  return { migratedCount: refs.length };
+}
+
+export async function removePrimary6ClassAndAssignments(): Promise<void> {
+  const summary = await inspectPrimary6Dependencies();
+  if (summary.studentsCount > 0) {
+    throw new Error(
+      `Primary 6 still has ${summary.studentsCount} enrolled pupil(s). Move those pupils to another class before removing Primary 6.`
+    );
+  }
+
+  const classNamesToMatch = Array.from(
+    new Set(['Primary 6', ...summary.classDocs.map((c) => c.name.trim()).filter(Boolean)])
+  );
+
+  const [subjSnap, ttSnap, schedSnap, teachersSnap, usersSnap, invitesSnap] = await Promise.all([
+    getDocs(query(collection(db, 'subjectAssignments'), where('className', 'in', classNamesToMatch))),
+    getDocs(query(collection(db, 'timetable'), where('className', 'in', classNamesToMatch))),
+    getDocs(query(collection(db, 'feeSchedules'), where('className', 'in', classNamesToMatch))),
+    getDocs(collection(db, 'teachers')),
+    getDocs(collection(db, 'users')),
+    getDocs(collection(db, 'staffInvites')),
+  ]);
+
+  const now = new Date().toISOString();
+  const ops: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
+
+  summary.classDocs.forEach((c) => {
+    ops.push((batch) => batch.delete(doc(db, 'classes', c.id)));
+  });
+
+  subjSnap.forEach((d) => ops.push((batch) => batch.delete(d.ref)));
+  ttSnap.forEach((d) => ops.push((batch) => batch.delete(d.ref)));
+  schedSnap.forEach((d) => ops.push((batch) => batch.delete(d.ref)));
+
+  teachersSnap.forEach((d) => {
+    const t = d.data() as Teacher;
+    if ((t.assignedClasses || []).some((clsName) => isPrimary6ClassName(clsName))) {
+      ops.push((batch) =>
+        batch.update(d.ref, {
+          assignedClasses: (t.assignedClasses || []).filter((c) => !isPrimary6ClassName(c)),
+          updatedAt: now,
+        })
+      );
+    }
+  });
+
+  usersSnap.forEach((d) => {
+    const u = d.data() as UserProfile;
+    if ((u.assignedClasses || []).some((clsName) => isPrimary6ClassName(clsName))) {
+      ops.push((batch) =>
+        batch.update(d.ref, {
+          assignedClasses: (u.assignedClasses || []).filter((c) => !isPrimary6ClassName(c)),
+          updatedAt: now,
+        })
+      );
+    }
+  });
+
+  invitesSnap.forEach((d) => {
+    const inv = d.data() as { assignedClasses?: string[] };
+    if ((inv.assignedClasses || []).some((clsName) => isPrimary6ClassName(clsName))) {
+      ops.push((batch) =>
+        batch.update(d.ref, {
+          assignedClasses: (inv.assignedClasses || []).filter((c) => !isPrimary6ClassName(c)),
+          updatedAt: now,
+        })
+      );
+    }
+  });
+
+  const CHUNK_SIZE = 400;
+  for (let i = 0; i < ops.length; i += CHUNK_SIZE) {
+    const batch = writeBatch(db);
+    ops.slice(i, i + CHUNK_SIZE).forEach((applyOp) => applyOp(batch));
+    await batch.commit();
   }
 }
 

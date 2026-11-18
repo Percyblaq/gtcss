@@ -27,7 +27,11 @@ import { PublicSchoolBranding, SchoolSetting, StaffInvite, UserProfile, UserRole
 import { INITIAL_SCHOOL_SETTINGS } from '../data/sampleData';
 import { subscribeSchoolSettings } from '../services/settingsAndTimetableService';
 import { subscribePublicBranding } from '../services/brandingService';
-import { syncStandardClassesToFirestore } from '../services/academicService';
+import {
+  Primary6DependencySummary,
+  reconcilePrimary6Removal,
+  syncStandardClassesToFirestore,
+} from '../services/academicService';
 import { getProfileSubjects } from '../utils/classUtils';
 
 // Director primary master email
@@ -66,6 +70,11 @@ interface AuthContextType {
   clearAuthNotice: () => void;
   schoolSettings: SchoolSetting;
   isSchoolSettingsPersisted: boolean;
+  primary6Warning: Primary6DependencySummary | null;
+  isPrimary6WarningModalOpen: boolean;
+  openPrimary6WarningModal: () => void;
+  dismissPrimary6WarningModal: () => void;
+  refreshPrimary6Warning: () => Promise<Primary6DependencySummary | null>;
   signInWithGoogle: () => Promise<{ success: boolean; error?: string; cancelled?: boolean }>;
   signInWithEmail: (
     email: string,
@@ -127,6 +136,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [publicBranding, setPublicBranding] = useState<PublicSchoolBranding | null>(null);
   const [schoolSettings, setSchoolSettings] = useState<SchoolSetting>(INITIAL_SCHOOL_SETTINGS);
   const [isSchoolSettingsPersisted, setIsSchoolSettingsPersisted] = useState<boolean>(false);
+  const [primary6Warning, setPrimary6Warning] = useState<Primary6DependencySummary | null>(null);
+  const [isPrimary6WarningModalOpen, setIsPrimary6WarningModalOpen] = useState<boolean>(false);
 
   const pendingDisplayNameRef = useRef<string | null>(null);
   const pendingPhoneRef = useRef<string | null>(null);
@@ -135,6 +146,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const syncedClassesUidRef = useRef<string | null>(null);
 
   const clearAuthNotice = () => setAuthNotice(null);
+  const openPrimary6WarningModal = () => {
+    if (primary6Warning?.needsDirectorAttention) {
+      setIsPrimary6WarningModalOpen(true);
+    }
+  };
+  const dismissPrimary6WarningModal = () => setIsPrimary6WarningModalOpen(false);
+  const refreshPrimary6Warning = async (): Promise<Primary6DependencySummary | null> => {
+    if (!currentUser || (currentUser.role !== 'director' && currentUser.role !== 'principal')) {
+      return null;
+    }
+    try {
+      const summary = await reconcilePrimary6Removal(currentUser.role === 'director');
+      setPrimary6Warning(summary.needsDirectorAttention ? summary : null);
+      if (!summary.needsDirectorAttention) {
+        setIsPrimary6WarningModalOpen(false);
+      }
+      return summary;
+    } catch (err) {
+      console.warn('Primary 6 status refresh skipped:', err);
+      return null;
+    }
+  };
 
   // Ensure browser local persistence and verify Firestore connection on initial boot
   useEffect(() => {
@@ -344,11 +377,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [schoolSettings.schoolName]);
 
-  // Ensure all standard classes (Creche – SS 3) exist in Firestore without duplicating or deleting existing ones
+  // Ensure all standard classes (Creche – SS 3, without Primary 6) exist in Firestore
+  // and safely reconcile Primary 6 removal without deleting linked data silently
   useEffect(() => {
     if (!firebaseUser || !firebaseUser.emailVerified || !currentUser) {
       if (!firebaseUser) {
         syncedClassesUidRef.current = null;
+        setPrimary6Warning(null);
+        setIsPrimary6WarningModalOpen(false);
       }
       return;
     }
@@ -365,6 +401,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     syncStandardClassesToFirestore().catch((err) => {
       console.warn('Automatic class structure sync skipped:', err);
     });
+    reconcilePrimary6Removal(currentUser.role === 'director')
+      .then((summary) => {
+        if (summary.needsDirectorAttention) {
+          setPrimary6Warning(summary);
+          setIsPrimary6WarningModalOpen(true);
+        } else {
+          setPrimary6Warning(null);
+          setIsPrimary6WarningModalOpen(false);
+        }
+      })
+      .catch((err) => {
+        console.warn('Primary 6 reconciliation check skipped:', err);
+      });
   }, [firebaseUser, currentUser]);
 
   // Subscribe to full school settings in Firestore when signed in, verified, and profiled;
@@ -948,6 +997,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         clearAuthNotice,
         schoolSettings,
         isSchoolSettingsPersisted,
+        primary6Warning,
+        isPrimary6WarningModalOpen,
+        openPrimary6WarningModal,
+        dismissPrimary6WarningModal,
+        refreshPrimary6Warning,
         signInWithGoogle,
         signInWithEmail,
         signUpWithEmail,
