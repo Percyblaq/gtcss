@@ -47,6 +47,7 @@ import {
   subscribeCalendarEvents,
   updateAnnouncementStatusInFirestore,
 } from '../services/communicationService';
+import { AnnouncementCommentsSection } from '../components/announcements/AnnouncementCommentsSection';
 
 type CommTab = 'notices' | 'calendar' | 'history';
 
@@ -731,6 +732,12 @@ export const AnnouncementsPage: React.FC = () => {
                       {item.term} • {item.session}
                     </span>
                   </div>
+
+                  <AnnouncementCommentsSection
+                    announcementId={item.id}
+                    canModerate={isAdmin}
+                    defaultExpanded={false}
+                  />
                 </div>
               ))}
             </div>

@@ -1033,6 +1033,42 @@ export const SettingsPage: React.FC = () => {
               </div>
             </div>
 
+            {/* Report Card Publishing Policy */}
+            <div className="bg-white rounded-[10px] border border-[#E6DFD3] p-6 shadow-[0_1px_2px_rgba(42,42,46,0.04),0_6px_16px_rgba(42,42,46,0.04)] space-y-3">
+              <div>
+                <h3 className="font-semibold text-sm text-[#2A2A2E] flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-[#6B1020]" />
+                  Parent Report Card Publishing Policy
+                </h3>
+                <p className="text-[11px] text-[#6E6A63] mt-0.5">
+                  Control whether parents can open published report cards when school fees are still owing.
+                </p>
+              </div>
+
+              <label className="flex items-center justify-between gap-3 p-3 rounded-[8px] bg-[#FAF8F4] border border-[#E6DFD3] cursor-pointer text-xs">
+                <div>
+                  <span className="font-semibold text-[#2A2A2E] block">
+                    Only publish when school fees are fully paid
+                  </span>
+                  <span className="text-[11px] text-[#6E6A63]">
+                    Off by default. When enabled, published report cards show a clear fee-clearance withheld notice to parents until school fees are fully paid.
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  disabled={!isDirector}
+                  checked={settings.requireFullFeesBeforePublishReport === true}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      requireFullFeesBeforePublishReport: e.target.checked,
+                    })
+                  }
+                  className="w-4 h-4 accent-[#6B1020] shrink-0"
+                />
+              </label>
+            </div>
+
             {isDirector && (
               <div className="flex justify-end">
                 <button

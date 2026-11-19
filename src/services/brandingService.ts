@@ -383,6 +383,7 @@ export function buildFullSchoolSettingsPayload(settings: SchoolSetting): Record<
     enableTeacherComment: merged.enableTeacherComment !== false,
     enableHeadComment: merged.enableHeadComment !== false,
     enablePrincipalComment: merged.enablePrincipalComment !== false,
+    requireFullFeesBeforePublishReport: Boolean(merged.requireFullFeesBeforePublishReport),
     logoDataUrl: (merged.logoDataUrl || '').trim().slice(0, 350000),
     logoUpdatedAt: (merged.logoUpdatedAt || '').trim().slice(0, 50),
     logoUpdatedBy: (merged.logoUpdatedBy || '').trim().slice(0, 120),

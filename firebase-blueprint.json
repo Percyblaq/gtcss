@@ -312,6 +312,21 @@
       },
       "required": ["title", "body", "targetAudience", "priority", "authorName"]
     },
+    "AnnouncementComment": {
+      "title": "AnnouncementComment",
+      "description": "Comment posted by a parent or staff member on a published school announcement",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "announcementId": { "type": "string", "maxLength": 128 },
+        "authorUid": { "type": "string", "maxLength": 128 },
+        "authorName": { "type": "string", "maxLength": 100 },
+        "authorRole": { "type": "string", "enum": ["director", "principal", "head_teacher", "bursar", "teacher", "parent"] },
+        "body": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["announcementId", "authorUid", "authorName", "authorRole", "body", "createdAt"]
+    },
     "SchoolCalendarEvent": {
       "title": "SchoolCalendarEvent",
       "description": "Published school calendar dates including examination schedules, resumption dates, and holidays",
@@ -361,6 +376,7 @@
         "enableTeacherComment": { "type": "boolean" },
         "enableHeadComment": { "type": "boolean" },
         "enablePrincipalComment": { "type": "boolean" },
+        "requireFullFeesBeforePublishReport": { "type": "boolean" },
         "logoDataUrl": { "type": "string", "maxLength": 350000 },
         "logoUpdatedAt": { "type": "string", "maxLength": 50 },
         "logoUpdatedBy": { "type": "string", "maxLength": 120 },
@@ -545,6 +561,94 @@
         "isBreak": { "type": "boolean" }
       },
       "required": ["day", "period", "timeRange", "className", "subject", "teacherName", "room"]
+    },
+    "PublishedReportSnapshot": {
+      "title": "PublishedReportSnapshot",
+      "description": "Frozen published snapshot of a student's approved terminal report card for read-only parent viewing",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 150 },
+        "admissionNo": { "type": "string", "maxLength": 30 },
+        "guardianEmail": { "type": "string", "maxLength": 128 },
+        "passportPhoto": { "type": "string", "maxLength": 300000 },
+        "classId": { "type": "string", "maxLength": 128 },
+        "className": { "type": "string", "maxLength": 60 },
+        "section": { "type": "string", "maxLength": 40 },
+        "session": { "type": "string", "maxLength": 40 },
+        "term": { "type": "string", "enum": ["First Term", "Second Term", "Third Term"] },
+        "records": { "type": "array", "description": "Frozen subject assessment scores" },
+        "subjectsCount": { "type": "number" },
+        "totalMarksObtained": { "type": "number" },
+        "totalMaxPossible": { "type": "number" },
+        "averagePercentage": { "type": "number" },
+        "overallGrade": { "type": "string", "maxLength": 10 },
+        "overallRemark": { "type": "string", "maxLength": 120 },
+        "position": { "type": ["number", "null"] },
+        "totalRankedStudents": { "type": "number" },
+        "components": { "type": "array", "description": "Frozen assessment components" },
+        "gradingScale": { "type": "array", "description": "Frozen grading boundaries" },
+        "rankingPolicy": { "type": "string", "enum": ["standard_competition", "dense"] },
+        "attendance": { "type": "object", "description": "Frozen attendance summary" },
+        "teacherComment": { "type": "string", "maxLength": 500 },
+        "teacherCommentBy": { "type": "string", "maxLength": 120 },
+        "teacherCommentAt": { "type": "string", "maxLength": 50 },
+        "headComment": { "type": "string", "maxLength": 500 },
+        "headCommentBy": { "type": "string", "maxLength": 120 },
+        "headCommentTitle": { "type": "string", "enum": ["Headmaster", "Headmistress"] },
+        "headCommentAt": { "type": "string", "maxLength": 50 },
+        "headSignature": { "type": "string", "maxLength": 350000 },
+        "principalComment": { "type": "string", "maxLength": 500 },
+        "principalCommentBy": { "type": "string", "maxLength": 120 },
+        "principalCommentAt": { "type": "string", "maxLength": 50 },
+        "principalSignature": { "type": "string", "maxLength": 350000 },
+        "enableTeacherComment": { "type": "boolean" },
+        "enableHeadComment": { "type": "boolean" },
+        "enablePrincipalComment": { "type": "boolean" },
+        "approvedBy": { "type": "string", "maxLength": 120 },
+        "approvedAt": { "type": "string", "maxLength": 50 },
+        "nextTermResumption": { "type": "string", "maxLength": 40 },
+        "isPublished": { "type": "boolean" },
+        "firstPublishedAt": { "type": "string", "maxLength": 50 },
+        "publishedAt": { "type": "string", "maxLength": 50 },
+        "publishedBy": { "type": "string", "maxLength": 120 },
+        "publishedByRole": { "type": "string", "enum": ["director", "principal"] },
+        "publishedByUid": { "type": "string", "maxLength": 128 },
+        "republishedAt": { "type": "string", "maxLength": 50 },
+        "republishedBy": { "type": "string", "maxLength": 120 },
+        "unpublishedAt": { "type": "string", "maxLength": 50 },
+        "unpublishedBy": { "type": "string", "maxLength": 120 },
+        "publishCount": { "type": "number" },
+        "feeClearedAtPublish": { "type": "boolean" },
+        "outstandingFeeBalanceAtPublish": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["studentId", "studentName", "admissionNo", "guardianEmail", "className", "session", "term", "records", "isPublished", "publishedAt", "publishedBy", "publishedByUid", "publishCount", "updatedAt"]
+    },
+    "ReportPublishAuditLog": {
+      "title": "ReportPublishAuditLog",
+      "description": "Immutable audit trail recording who published, republished, or unpublished each report card and when",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "action": { "type": "string", "enum": ["published", "republished", "unpublished"] },
+        "reportId": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 150 },
+        "admissionNo": { "type": "string", "maxLength": 30 },
+        "guardianEmail": { "type": "string", "maxLength": 128 },
+        "className": { "type": "string", "maxLength": 60 },
+        "session": { "type": "string", "maxLength": 40 },
+        "term": { "type": "string", "enum": ["First Term", "Second Term", "Third Term"] },
+        "performedBy": { "type": "string", "maxLength": 120 },
+        "performedByRole": { "type": "string", "enum": ["director", "principal"] },
+        "performedByUid": { "type": "string", "maxLength": 128 },
+        "performedAt": { "type": "string", "maxLength": 50 },
+        "feeClearedAtAction": { "type": "boolean" },
+        "details": { "type": "string", "maxLength": 300 }
+      },
+      "required": ["action", "reportId", "studentId", "studentName", "admissionNo", "className", "session", "term", "performedBy", "performedByRole", "performedByUid", "performedAt"]
     }
   },
   "firestore": {
@@ -596,6 +700,10 @@
       "schema": "Announcement",
       "description": "School wide and role-targeted announcements"
     },
+    "/announcements/{announcementId}/comments/{commentId}": {
+      "schema": "AnnouncementComment",
+      "description": "Comments on published announcements posted by parents and school staff"
+    },
     "/settings/{settingId}": {
       "schema": "SchoolSetting",
       "description": "School administration configuration"
@@ -635,6 +743,14 @@
     "/timetable/{slotId}": {
       "schema": "TimetableSlot",
       "description": "Class weekly timetable slots stored in Firestore"
+    },
+    "/publishedReports/{reportId}": {
+      "schema": "PublishedReportSnapshot",
+      "description": "Frozen published report card snapshots accessible read-only to matching parents"
+    },
+    "/reportPublishAuditLogs/{logId}": {
+      "schema": "ReportPublishAuditLog",
+      "description": "Immutable Director/Principal audit log of report card publish, republish, and unpublish actions"
     }
   }
 }

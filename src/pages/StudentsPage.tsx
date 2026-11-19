@@ -406,7 +406,7 @@ export const StudentsPage: React.FC = () => {
     const trimmedSurname = formState.surname.trim();
     const trimmedGuardian = formState.guardianName.trim();
     const trimmedPhone = formState.guardianPhone.trim();
-    const trimmedEmail = formState.guardianEmail.trim();
+    const trimmedEmail = formState.guardianEmail.trim().toLowerCase();
     const trimmedAddress = formState.address.trim();
 
     if (!trimmedAdmNo) {
@@ -430,7 +430,7 @@ export const StudentsPage: React.FC = () => {
       return;
     }
     if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-      setFormError('Please enter a valid Parent/Guardian email address.');
+      setFormError('Please enter a valid Parent/Guardian Google (Gmail) email address.');
       return;
     }
     if (!trimmedAddress) {
@@ -1282,18 +1282,41 @@ export const StudentsPage: React.FC = () => {
                     </div>
                     <div>
                       <label className="block font-medium text-[#5E5B56] mb-1">
-                        Parent Email *
+                        Parent Email (Google/Gmail) *
                       </label>
                       <input
                         type="email"
                         required
-                        placeholder="parent@domain.ng"
+                        placeholder="parent@gmail.com"
                         value={formState.guardianEmail}
                         onChange={(e) =>
                           setFormState({ ...formState, guardianEmail: e.target.value })
                         }
-                        className="w-full px-3 py-2 border border-[#DDD5C7] rounded-[8px] bg-white text-[#2A2A2E] focus:ring-2 focus:ring-[#6B1020]/15 focus:border-[#6B1020] focus:outline-none"
+                        className={`w-full px-3 py-2 border rounded-[8px] bg-white text-[#2A2A2E] focus:ring-2 focus:outline-none ${
+                          formState.guardianEmail.trim() &&
+                          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formState.guardianEmail.trim())
+                            ? 'border-[#86222E] focus:ring-[#86222E]/20 focus:border-[#86222E]'
+                            : 'border-[#DDD5C7] focus:ring-[#6B1020]/15 focus:border-[#6B1020]'
+                        }`}
                       />
+                      <p className="text-[11px] text-[#6E6A63] mt-1 leading-snug">
+                        Parent Email must be the Google (Gmail) address the parent will use to sign in.
+                      </p>
+                      {formState.guardianEmail.trim() &&
+                        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formState.guardianEmail.trim()) && (
+                          <p className="text-[11px] text-[#86222E] font-medium mt-0.5">
+                            Please enter a valid email address (e.g. parent@gmail.com).
+                          </p>
+                        )}
+                      {formState.guardianEmail.trim() &&
+                        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formState.guardianEmail.trim()) &&
+                        !/^[^\s@]+@(gmail\.com|googlemail\.com)$/i.test(
+                          formState.guardianEmail.trim()
+                        ) && (
+                          <p className="text-[11px] text-[#7D5A18] mt-0.5">
+                            Note: Non-Gmail domain entered. Confirm this address is linked to a Google account so the parent can sign in with Google.
+                          </p>
+                        )}
                     </div>
                   </div>
 

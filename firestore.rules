@@ -33,6 +33,17 @@ service cloud.firestore {
       return resource.data;
     }
 
+    function isValidDataImageUrl(val, maxBytes) {
+      return val is string &&
+             val.size() <= maxBytes &&
+             (
+               val.size() == 0 ||
+               (val.size() >= 22 && val[0:22] == 'data:image/png;base64,') ||
+               (val.size() >= 23 && val[0:23] == 'data:image/jpeg;base64,') ||
+               (val.size() >= 23 && val[0:23] == 'data:image/webp;base64,')
+             );
+    }
+
     function hasUserDoc() {
       return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
@@ -57,22 +68,29 @@ service cloud.firestore {
 
     function isPrincipal() {
       return isAccountActive() && (
-        isDirector() ||
-        getUserDoc().role == 'principal'
+        (request.auth.token.email != null && request.auth.token.email.lower() == "patrickpercy1989@gmail.com") ||
+        getUserDoc().role in ['director', 'principal']
       );
     }
 
     function isHeadTeacher() {
       return isAccountActive() && (
-        isDirector() ||
-        getUserDoc().role == 'head_teacher'
+        (request.auth.token.email != null && request.auth.token.email.lower() == "patrickpercy1989@gmail.com") ||
+        getUserDoc().role in ['director', 'head_teacher']
       );
+    }
+
+    function canManagePublishedReports() {
+      return (isEmailVerified() &&
+              request.auth.token.email != null &&
+              request.auth.token.email.lower() == "patrickpercy1989@gmail.com") ||
+             (isAccountActive() && getUserDoc().role in ['director', 'principal', 'head_teacher']);
     }
 
     function isBursar() {
       return isAccountActive() && (
-        isDirector() ||
-        getUserDoc().role == 'bursar'
+        (request.auth.token.email != null && request.auth.token.email.lower() == "patrickpercy1989@gmail.com") ||
+        getUserDoc().role in ['director', 'bursar']
       );
     }
 
@@ -99,13 +117,20 @@ service cloud.firestore {
       );
     }
 
-    // Parent ward restriction helper
+    // Parent ward restriction helper (statically verifiable by Firestore list query analyzer)
+    function parentEmailMatches(guardianEmail) {
+      return isParent() &&
+             request.auth.token.email != null &&
+             request.auth.token.email.size() > 0 &&
+             (guardianEmail == request.auth.token.email.lower() ||
+              guardianEmail == request.auth.token.email);
+    }
+
     function parentHasWard(studentId, guardianEmail) {
-      return isParent() && (
-        (guardianEmail != null && guardianEmail != '' &&
-         request.auth.token.email != null &&
-         guardianEmail.lower() == request.auth.token.email.lower()) ||
-        (getUserDoc().keys().hasAny(['linkedStudentIds']) && (studentId in getUserDoc().linkedStudentIds))
+      return parentEmailMatches(guardianEmail) || (
+        isParent() &&
+        getUserDoc().keys().hasAny(['linkedStudentIds']) &&
+        (studentId in getUserDoc().linkedStudentIds)
       );
     }
 
@@ -334,19 +359,11 @@ service cloud.firestore {
              (!data.keys().hasAny(['headCommentBy']) || (data.headCommentBy is string && data.headCommentBy.size() <= 120)) &&
              (!data.keys().hasAny(['headCommentTitle']) || data.headCommentTitle in ['Headmaster', 'Headmistress']) &&
              (!data.keys().hasAny(['headCommentAt']) || (data.headCommentAt is string && data.headCommentAt.size() <= 50)) &&
-             (!data.keys().hasAny(['headSignature']) || (
-               data.headSignature is string &&
-               data.headSignature.size() <= 350000 &&
-               (data.headSignature.size() == 0 || data.headSignature.matches('^data:image/(png|jpeg|webp);base64,.*'))
-             )) &&
+             (!data.keys().hasAny(['headSignature']) || isValidDataImageUrl(data.headSignature, 350000)) &&
              (!data.keys().hasAny(['principalComment']) || (data.principalComment is string && data.principalComment.size() <= 500)) &&
              (!data.keys().hasAny(['principalCommentBy']) || (data.principalCommentBy is string && data.principalCommentBy.size() <= 120)) &&
              (!data.keys().hasAny(['principalCommentAt']) || (data.principalCommentAt is string && data.principalCommentAt.size() <= 50)) &&
-             (!data.keys().hasAny(['principalSignature']) || (
-               data.principalSignature is string &&
-               data.principalSignature.size() <= 350000 &&
-               (data.principalSignature.size() == 0 || data.principalSignature.matches('^data:image/(png|jpeg|webp);base64,.*'))
-             )) &&
+             (!data.keys().hasAny(['principalSignature']) || isValidDataImageUrl(data.principalSignature, 350000)) &&
              (!data.keys().hasAny(['reviewedBy']) || (data.reviewedBy is string && data.reviewedBy.size() <= 120)) &&
              (!data.keys().hasAny(['reviewedAt']) || (data.reviewedAt is string && data.reviewedAt.size() <= 50)) &&
              (!data.keys().hasAny(['approvedBy']) || (data.approvedBy is string && data.approvedBy.size() <= 120)) &&
@@ -449,6 +466,30 @@ service cloud.firestore {
              (!data.keys().hasAny(['updatedAt']) || (data.updatedAt is string && data.updatedAt.size() <= 50));
     }
 
+    function canReadAnnouncementForComments(announcementId) {
+      return isAccountActive() && (
+        isPrincipal() ||
+        ((isTeacher() || isHeadTeacher() || isBursar()) &&
+         get(/databases/$(database)/documents/announcements/$(announcementId)).data.status == 'Published' &&
+         get(/databases/$(database)/documents/announcements/$(announcementId)).data.targetAudience in ['All', 'Teachers', 'Specific Classes']) ||
+        (isParent() &&
+         get(/databases/$(database)/documents/announcements/$(announcementId)).data.status == 'Published' &&
+         get(/databases/$(database)/documents/announcements/$(announcementId)).data.targetAudience in ['All', 'Parents', 'Students', 'Specific Classes'])
+      );
+    }
+
+    function isValidAnnouncementComment(data, announcementId) {
+      return data.keys().hasAll(['announcementId', 'authorUid', 'authorName', 'authorRole', 'body', 'createdAt']) &&
+             data.keys().hasOnly(['id', 'announcementId', 'authorUid', 'authorName', 'authorRole', 'body', 'createdAt']) &&
+             (!data.keys().hasAny(['id']) || (data.id is string && data.id.size() > 0 && data.id.size() <= 128)) &&
+             data.announcementId is string && data.announcementId == announcementId &&
+             data.authorUid is string && data.authorUid == request.auth.uid &&
+             data.authorName is string && data.authorName.size() > 0 && data.authorName.size() <= 100 &&
+             data.authorRole in ['director', 'principal', 'head_teacher', 'bursar', 'teacher', 'parent'] &&
+             data.body is string && data.body.size() > 0 && data.body.size() <= 1000 &&
+             data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 50;
+    }
+
     function isValidCalendarEvent(data) {
       return data.keys().hasAll(['title', 'eventType', 'session', 'term', 'startDate', 'targetAudience', 'publishedBy']) &&
              data.keys().hasOnly([
@@ -480,6 +521,7 @@ service cloud.firestore {
                'directorName', 'principalName',
                'headTeacherTitle', 'headTeacherName', 'headTeacherSignature', 'principalSignature',
                'enableTeacherComment', 'enableHeadComment', 'enablePrincipalComment',
+               'requireFullFeesBeforePublishReport',
                'logoDataUrl', 'logoUpdatedAt', 'logoUpdatedBy', 'updatedAt'
              ]) &&
              data.schoolName is string && data.schoolName.size() > 0 && data.schoolName.size() <= 150 &&
@@ -501,24 +543,13 @@ service cloud.firestore {
              (!data.keys().hasAny(['principalName']) || (data.principalName is string && data.principalName.size() <= 120)) &&
              (!data.keys().hasAny(['headTeacherTitle']) || data.headTeacherTitle in ['Headmaster', 'Headmistress']) &&
              (!data.keys().hasAny(['headTeacherName']) || (data.headTeacherName is string && data.headTeacherName.size() <= 120)) &&
-             (!data.keys().hasAny(['headTeacherSignature']) || (
-               data.headTeacherSignature is string &&
-               data.headTeacherSignature.size() <= 350000 &&
-               (data.headTeacherSignature.size() == 0 || data.headTeacherSignature.matches('^data:image/(png|jpeg|webp);base64,.*'))
-             )) &&
-             (!data.keys().hasAny(['principalSignature']) || (
-               data.principalSignature is string &&
-               data.principalSignature.size() <= 350000 &&
-               (data.principalSignature.size() == 0 || data.principalSignature.matches('^data:image/(png|jpeg|webp);base64,.*'))
-             )) &&
+             (!data.keys().hasAny(['headTeacherSignature']) || isValidDataImageUrl(data.headTeacherSignature, 350000)) &&
+             (!data.keys().hasAny(['principalSignature']) || isValidDataImageUrl(data.principalSignature, 350000)) &&
              (!data.keys().hasAny(['enableTeacherComment']) || data.enableTeacherComment is bool) &&
              (!data.keys().hasAny(['enableHeadComment']) || data.enableHeadComment is bool) &&
              (!data.keys().hasAny(['enablePrincipalComment']) || data.enablePrincipalComment is bool) &&
-             (!data.keys().hasAny(['logoDataUrl']) || (
-               data.logoDataUrl is string &&
-               data.logoDataUrl.size() <= 350000 &&
-               (data.logoDataUrl.size() == 0 || data.logoDataUrl.matches('^data:image/(png|jpeg|webp);base64,.*'))
-             )) &&
+             (!data.keys().hasAny(['requireFullFeesBeforePublishReport']) || data.requireFullFeesBeforePublishReport is bool) &&
+             (!data.keys().hasAny(['logoDataUrl']) || isValidDataImageUrl(data.logoDataUrl, 350000)) &&
              (!data.keys().hasAny(['logoUpdatedAt']) || (data.logoUpdatedAt is string && data.logoUpdatedAt.size() <= 50)) &&
              (!data.keys().hasAny(['logoUpdatedBy']) || (data.logoUpdatedBy is string && data.logoUpdatedBy.size() <= 120)) &&
              (!data.keys().hasAny(['updatedAt']) || (data.updatedAt is string && data.updatedAt.size() <= 50));
@@ -531,11 +562,7 @@ service cloud.firestore {
              ]) &&
              data.schoolName is string && data.schoolName.size() > 0 && data.schoolName.size() <= 150 &&
              (!data.keys().hasAny(['motto']) || (data.motto is string && data.motto.size() <= 200)) &&
-             (!data.keys().hasAny(['logoDataUrl']) || (
-               data.logoDataUrl is string &&
-               data.logoDataUrl.size() <= 350000 &&
-               (data.logoDataUrl.size() == 0 || data.logoDataUrl.matches('^data:image/(png|jpeg|webp);base64,.*'))
-             )) &&
+             (!data.keys().hasAny(['logoDataUrl']) || isValidDataImageUrl(data.logoDataUrl, 350000)) &&
              (!data.keys().hasAny(['website']) || (data.website is string && data.website.size() <= 128)) &&
              (!data.keys().hasAny(['updatedAt']) || (data.updatedAt is string && data.updatedAt.size() <= 50));
     }
@@ -773,6 +800,7 @@ service cloud.firestore {
       allow update: if isAccountActive() && isValidId(userId) && isValidUser(incoming()) && (
         isDirector() ||
         (isOwner(userId) &&
+         existing().role != 'parent' &&
          incoming().uid == existing().uid &&
          incoming().email == existing().email &&
          incoming().role == existing().role &&
@@ -794,21 +822,21 @@ service cloud.firestore {
       allow delete: if isDirector() && isValidId(inviteId);
     }
 
-    // Students Collection
+    // Students Collection (Parents read ONLY students whose Parent Email matches their verified Google email; zero writes)
     match /students/{studentId} {
       allow get: if isAccountActive() && (
         isPrincipal() ||
         isHeadTeacher() ||
         isBursar() ||
         (isTeacher() && teacherHasClass(resource.data.className)) ||
-        (isParent() && parentHasWard(studentId, resource.data.guardianEmail))
+        parentEmailMatches(resource.data.guardianEmail)
       );
       allow list: if isAccountActive() && (
         isPrincipal() ||
         isHeadTeacher() ||
         isBursar() ||
         (isTeacher() && teacherHasClass(resource.data.className)) ||
-        (isParent() && parentHasWard(studentId, resource.data.guardianEmail))
+        parentEmailMatches(resource.data.guardianEmail)
       );
       allow create: if isPrincipal() && isValidId(studentId) && isValidStudent(incoming());
       allow update: if isValidId(studentId) && isValidStudent(incoming()) && (
@@ -860,19 +888,17 @@ service cloud.firestore {
       allow delete: if isPrincipal() && isValidId(assignmentId);
     }
 
-    // Result Reviews, Three-Tier Comments & Approvals (Per-Box Role Enforcement)
+    // Result Reviews, Three-Tier Comments & Approvals (Staff only — Parents use frozen publishedReports snapshots)
     match /resultReviews/{reviewId} {
       allow get: if isAccountActive() && (
         isPrincipal() ||
         isHeadTeacher() ||
-        (isTeacher() && teacherHasClass(resource.data.className)) ||
-        (isParent() && parentHasWard(resource.data.studentId, resource.data.guardianEmail) && resource.data.status == 'Approved')
+        (isTeacher() && teacherHasClass(resource.data.className))
       );
       allow list: if isAccountActive() && (
         isPrincipal() ||
         isHeadTeacher() ||
-        (isTeacher() && teacherHasClass(resource.data.className)) ||
-        (isParent() && parentHasWard(resource.data.studentId, resource.data.guardianEmail) && resource.data.status == 'Approved')
+        (isTeacher() && teacherHasClass(resource.data.className))
       );
       allow create: if isValidId(reviewId) && isValidResultReview(incoming()) && (
         isDirector() ||
@@ -929,19 +955,38 @@ service cloud.firestore {
       allow delete: if isDirector() && isValidId(reviewId);
     }
 
-    // Academic Assessment Records (CA Components & Terminal Exams; parent reads gated by isApproved == true)
+    // Frozen Published Report Card Snapshots
+    // Director, Principal, and Head Teacher can read, create, update, and delete;
+    // verified signed-in parents can read ONLY published reports whose guardianEmail matches their verified Google email in lowercase, and cannot write;
+    // everyone else has no access.
+    match /publishedReports/{reportId} {
+      allow get, list: if canManagePublishedReports() || (
+        isParent() &&
+        request.auth.token.email != null &&
+        request.auth.token.email.size() > 0 &&
+        resource.data.isPublished == true &&
+        resource.data.guardianEmail == request.auth.token.email.lower()
+      );
+      allow create, update, delete: if canManagePublishedReports();
+    }
+
+    // Report Card Publish/Republish/Unpublish Audit Log
+    // Director, Principal, and Head Teacher roles only; everyone else has no access.
+    match /reportPublishAuditLogs/{logId} {
+      allow get, list, create, update, delete: if canManagePublishedReports();
+    }
+
+    // Academic Assessment Records (Staff only — Parents read frozen publishedReports snapshots only)
     match /academics/{recordId} {
       allow get: if isAccountActive() && (
         isPrincipal() ||
         isHeadTeacher() ||
-        (isTeacher() && teacherHasClass(resource.data.className)) ||
-        (isParent() && parentHasWard(resource.data.studentId, resource.data.guardianEmail) && resource.data.isApproved == true)
+        (isTeacher() && teacherHasClass(resource.data.className))
       );
       allow list: if isAccountActive() && (
         isPrincipal() ||
         isHeadTeacher() ||
-        (isTeacher() && teacherHasClass(resource.data.className)) ||
-        (isParent() && parentHasWard(resource.data.studentId, resource.data.guardianEmail) && resource.data.isApproved == true)
+        (isTeacher() && teacherHasClass(resource.data.className))
       );
       allow create: if isValidId(recordId) && isValidAcademicRecord(incoming()) && (
         isPrincipal() ||
@@ -965,19 +1010,17 @@ service cloud.firestore {
       allow delete: if isDirector() && isValidId(recordId);
     }
 
-    // Attendance Register Records
+    // Attendance Register Records (Staff only — Parents read attendance summary inside publishedReports snapshots)
     match /attendance/{recordId} {
       allow get: if isAccountActive() && (
         isPrincipal() ||
         isHeadTeacher() ||
-        (isTeacher() && teacherHasClass(resource.data.className)) ||
-        (isParent() && parentHasWard(resource.data.studentId, resource.data.guardianEmail))
+        (isTeacher() && teacherHasClass(resource.data.className))
       );
       allow list: if isAccountActive() && (
         isPrincipal() ||
         isHeadTeacher() ||
-        (isTeacher() && teacherHasClass(resource.data.className)) ||
-        (isParent() && parentHasWard(resource.data.studentId, resource.data.guardianEmail))
+        (isTeacher() && teacherHasClass(resource.data.className))
       );
       allow create: if isValidId(recordId) && isValidAttendance(incoming()) && (
         isDirector() ||
@@ -1009,6 +1052,20 @@ service cloud.firestore {
       );
       allow create, update: if isPrincipal() && isValidId(announcementId) && isValidAnnouncement(incoming());
       allow delete: if isDirector() && isValidId(announcementId);
+
+      // Comments on Announcements (Parents & Staff can view and post comments on announcements visible to them;
+      // comments cannot be edited; only Director or Principal can delete comments)
+      match /comments/{commentId} {
+        allow get: if isValidId(announcementId) && isValidId(commentId) && canReadAnnouncementForComments(announcementId);
+        allow list: if isValidId(announcementId) && canReadAnnouncementForComments(announcementId);
+        allow create: if isValidId(announcementId) &&
+          isValidId(commentId) &&
+          canReadAnnouncementForComments(announcementId) &&
+          isValidAnnouncementComment(incoming(), announcementId) &&
+          (incoming().authorRole == getUserDoc().role || (isDirector() && incoming().authorRole == 'director'));
+        allow update: if false;
+        allow delete: if isValidId(announcementId) && isValidId(commentId) && (isDirector() || isPrincipal());
+      }
     }
 
     // Published School Calendar Events (Exams, Resumption Dates, Holidays)

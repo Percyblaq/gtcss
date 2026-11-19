@@ -27,23 +27,21 @@ function stripUndefined<T extends Record<string, any>>(obj: T): Record<string, a
   return cleaned;
 }
 
-// Parse friendly message from handleFirestoreError JSON or raw error
+// Parse real message from handleFirestoreError JSON or raw error (preserving details)
 export function extractFriendlyError(err: unknown, fallback: string): string {
   if (!err) return fallback;
   const raw = err instanceof Error ? err.message : String(err);
   try {
     const parsed = JSON.parse(raw);
     if (parsed?.error) {
-      if (String(parsed.error).toLowerCase().includes('permission')) {
-        return 'Permission denied by Cloud Firestore Security Rules. Verify your role and active account status.';
-      }
-      return String(parsed.error);
+      const base = String(parsed.error);
+      const details: string[] = [];
+      if (parsed.operationType) details.push(`op: ${parsed.operationType}`);
+      if (parsed.path) details.push(`path: ${parsed.path}`);
+      return details.length > 0 ? `${base} (${details.join(', ')})` : base;
     }
   } catch {
     // Not JSON
-  }
-  if (raw.toLowerCase().includes('permission')) {
-    return 'Permission denied by Cloud Firestore Security Rules. Verify your role and active account status.';
   }
   return raw || fallback;
 }
@@ -190,47 +188,95 @@ export function subscribeStudents(
 
   if (role === 'parent') {
     const linkedIds = (currentUser?.linkedStudentIds || []).filter(Boolean);
-    const parentEmail = (authEmail || currentUser?.email || '').trim().toLowerCase();
+    const rawEmail = (authEmail || currentUser?.email || '').trim();
+    const lowerEmail = rawEmail.toLowerCase();
 
-    if (!parentEmail && linkedIds.length === 0) {
+    if (!lowerEmail && linkedIds.length === 0) {
       onData([]);
       return () => {};
     }
 
-    if (parentEmail) {
-      const q = query(studentsRef, where('guardianEmail', '==', parentEmail));
-      return onSnapshot(
-        q,
-        async (snap) => {
-          const map = new Map<string, Student>();
-          snap.docs.forEach((d) => {
-            map.set(d.id, { ...(d.data() as Student), id: d.id });
-          });
+    if (lowerEmail) {
+      const lowerMap = new Map<string, Student>();
+      const rawMap = new Map<string, Student>();
+      const linkedMap = new Map<string, Student>();
+      let lowerLoaded = false;
 
-          // Also include explicitly linked wards via direct doc read
-          for (const wardId of linkedIds) {
-            if (!map.has(wardId)) {
-              try {
-                const wardSnap = await getDoc(doc(db, 'students', wardId));
-                if (wardSnap.exists()) {
-                  map.set(wardSnap.id, { ...(wardSnap.data() as Student), id: wardSnap.id });
-                }
-              } catch {
-                // Ignore if ward doc doesn't exist or not linked
+      const emitMerged = async () => {
+        // Include explicitly linked wards via direct doc read if any
+        for (const wardId of linkedIds) {
+          if (!lowerMap.has(wardId) && !rawMap.has(wardId) && !linkedMap.has(wardId)) {
+            try {
+              const wardSnap = await getDoc(doc(db, 'students', wardId));
+              if (wardSnap.exists()) {
+                linkedMap.set(wardSnap.id, { ...(wardSnap.data() as Student), id: wardSnap.id });
               }
+            } catch (wardErr) {
+              console.warn(`Ward direct lookup skipped for students/${wardId}:`, wardErr);
             }
           }
-
-          onData(Array.from(map.values()));
-        },
-        (err) => {
-          try {
-            handleFirestoreError(err, OperationType.LIST, 'students');
-          } catch (wrapped) {
-            onError(extractFriendlyError(wrapped, 'Unable to load ward records.'));
-          }
         }
+
+        const combined = new Map<string, Student>();
+        linkedMap.forEach((v, k) => combined.set(k, v));
+        rawMap.forEach((v, k) => combined.set(k, v));
+        lowerMap.forEach((v, k) => combined.set(k, v));
+        if (lowerLoaded) {
+          onData(Array.from(combined.values()));
+        }
+      };
+
+      const unsubs: Unsubscribe[] = [];
+      const qLower = query(studentsRef, where('guardianEmail', '==', lowerEmail));
+      unsubs.push(
+        onSnapshot(
+          qLower,
+          (snap) => {
+            lowerLoaded = true;
+            lowerMap.clear();
+            snap.docs.forEach((d) => {
+              lowerMap.set(d.id, { ...(d.data() as Student), id: d.id });
+            });
+            void emitMerged();
+          },
+          (err) => {
+            console.error('Parent students query failed (lowercase email):', err);
+            try {
+              handleFirestoreError(err, OperationType.LIST, 'students');
+            } catch (wrapped) {
+              onError(extractFriendlyError(wrapped, 'Unable to load student records.'));
+            }
+          }
+        )
       );
+
+      if (rawEmail && rawEmail !== lowerEmail) {
+        const qRaw = query(studentsRef, where('guardianEmail', '==', rawEmail));
+        unsubs.push(
+          onSnapshot(
+            qRaw,
+            (snap) => {
+              rawMap.clear();
+              snap.docs.forEach((d) => {
+                rawMap.set(d.id, { ...(d.data() as Student), id: d.id });
+              });
+              void emitMerged();
+            },
+            (err) => {
+              console.error('Parent students query failed (raw email casing):', err);
+              try {
+                handleFirestoreError(err, OperationType.LIST, 'students');
+              } catch (wrapped) {
+                onError(extractFriendlyError(wrapped, 'Unable to load student records.'));
+              }
+            }
+          )
+        );
+      }
+
+      return () => {
+        unsubs.forEach((u) => u());
+      };
     }
 
     // Fallback when only linkedStudentIds exist
@@ -247,8 +293,9 @@ export function subscribeStudents(
         }
       })
       .catch((err) => {
+        console.error('Parent linked ward load failed:', err);
         if (active) {
-          onError(extractFriendlyError(err, 'Unable to load linked ward records.'));
+          onError(extractFriendlyError(err, 'Unable to load linked student records.'));
         }
       });
 

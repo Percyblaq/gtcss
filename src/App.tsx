@@ -13,10 +13,11 @@ import { TimetablePage } from './pages/TimetablePage';
 import { ReportsPage } from './pages/ReportsPage';
 import { AnnouncementsPage } from './pages/AnnouncementsPage';
 import { SettingsPage } from './pages/SettingsPage';
-import { ShieldAlert, ArrowLeft, RefreshCw } from 'lucide-react';
+import { ShieldAlert, ArrowLeft, RefreshCw, LogOut } from 'lucide-react';
 import { UserRole } from './types';
 import { SchoolLogo } from './components/common/SchoolLogo';
 import { Primary6WarningModal } from './components/common/Primary6WarningModal';
+import { ParentPortalView } from './components/parent/ParentPortalView';
 
 // Route permissions map
 const PAGE_PERMISSIONS: Record<string, UserRole[]> = {
@@ -86,6 +87,7 @@ function AppContent() {
     isPrimary6WarningModalOpen,
     dismissPrimary6WarningModal,
     refreshPrimary6Warning,
+    signOutUser,
   } = useAuth();
 
   const academicsLeaveGuardRef = useRef<((proceed: () => void) => boolean) | null>(null);
@@ -133,6 +135,52 @@ function AppContent() {
     return (
       <div className="min-h-screen bg-[#F7F4EF]">
         <LoginPage onLoginSuccess={() => handleNavigate('dashboard')} />
+      </div>
+    );
+  }
+
+  // Dedicated Isolated Parent Portal ("My Children") — zero admin sidebar or other modules
+  if (role === 'parent') {
+    return (
+      <div className="min-h-screen bg-[#F7F4EF] flex flex-col">
+        <header className="sticky top-0 z-30 bg-white border-b border-[#E6DFD3] px-4 sm:px-8 py-3 shadow-[0_1px_2px_rgba(42,42,46,0.03)] no-print">
+          <div className="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <SchoolLogo
+                logoDataUrl={schoolSettings.logoDataUrl}
+                schoolName={schoolSettings.schoolName}
+                size="md"
+                variant="default"
+              />
+              <div className="min-w-0">
+                <p className="font-serif text-sm sm:text-base font-semibold text-[#6B1020] truncate">
+                  {schoolSettings.schoolName}
+                </p>
+                <p className="text-[11px] text-[#5E5B56] truncate">
+                  Parent Portal • My Children &amp; Announcements
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="hidden sm:inline-block text-xs text-[#5E5B56] truncate max-w-[220px]">
+                {firebaseUser.email || currentUser.email}
+              </span>
+              <button
+                type="button"
+                onClick={signOutUser}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] bg-[#FAF8F4] hover:bg-[#FAF0F2] border border-[#DDD5C7] hover:border-[#DFC7CA] text-[#6B1020] text-xs font-medium transition-colors"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 w-full max-w-5xl mx-auto p-4 sm:p-6 lg:p-8">
+          <ParentPortalView />
+        </main>
       </div>
     );
   }

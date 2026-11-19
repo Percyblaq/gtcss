@@ -484,6 +484,16 @@ export interface Announcement {
   updatedAt?: string;
 }
 
+export interface AnnouncementComment {
+  id: string;
+  announcementId: string;
+  authorUid: string;
+  authorName: string;
+  authorRole: UserRole;
+  body: string;
+  createdAt: string;
+}
+
 export type CalendarEventType =
   | 'Examination Schedule'
   | 'Resumption Date'
@@ -533,6 +543,7 @@ export interface SchoolSetting {
   enableTeacherComment?: boolean;
   enableHeadComment?: boolean;
   enablePrincipalComment?: boolean;
+  requireFullFeesBeforePublishReport?: boolean;
   logoDataUrl?: string;
   logoUpdatedAt?: string;
   logoUpdatedBy?: string;
@@ -545,4 +556,105 @@ export interface PublicSchoolBranding {
   logoDataUrl?: string;
   website?: string;
   updatedAt?: string;
+}
+
+export interface PublishedReportSubjectRecord {
+  subject: string;
+  ca1: number;
+  ca2: number;
+  exam: number;
+  componentScores?: Record<string, number>;
+  total: number;
+  maxTotal: number;
+  percentage: number;
+  grade: string;
+  remark: string;
+}
+
+export interface PublishedReportSnapshot {
+  id: string;
+  studentId: string;
+  studentName: string;
+  admissionNo: string;
+  guardianEmail: string;
+  passportPhoto?: string;
+  classId?: string;
+  className: string;
+  section?: string;
+  session: string;
+  term: AcademicTerm;
+  records: PublishedReportSubjectRecord[];
+  subjectsCount: number;
+  totalMarksObtained: number;
+  totalMaxPossible: number;
+  averagePercentage: number;
+  overallGrade: string;
+  overallRemark: string;
+  position?: number | null;
+  totalRankedStudents: number;
+  components: AssessmentComponent[];
+  gradingScale: GradeBoundary[];
+  rankingPolicy: RankingPolicy;
+  attendance: {
+    totalRecords: number;
+    present: number;
+    late: number;
+    absent: number;
+    excused: number;
+    attendedCount: number;
+    attendanceRate: number;
+  };
+  teacherComment: string;
+  teacherCommentBy?: string;
+  teacherCommentAt?: string;
+  headComment?: string;
+  headCommentBy?: string;
+  headCommentTitle?: HeadTeacherTitle;
+  headCommentAt?: string;
+  headSignature?: string;
+  principalComment: string;
+  principalCommentBy?: string;
+  principalCommentAt?: string;
+  principalSignature?: string;
+  enableTeacherComment?: boolean;
+  enableHeadComment?: boolean;
+  enablePrincipalComment?: boolean;
+  approvedBy?: string;
+  approvedAt?: string;
+  nextTermResumption?: string;
+  isPublished: boolean;
+  firstPublishedAt?: string;
+  publishedAt: string;
+  publishedBy: string;
+  publishedByRole?: UserRole;
+  publishedByUid: string;
+  republishedAt?: string;
+  republishedBy?: string;
+  unpublishedAt?: string;
+  unpublishedBy?: string;
+  publishCount: number;
+  feeClearedAtPublish?: boolean;
+  outstandingFeeBalanceAtPublish?: number;
+  updatedAt: string;
+}
+
+export type ReportPublishActionType = 'published' | 'republished' | 'unpublished';
+
+export interface ReportPublishAuditLog {
+  id: string;
+  action: ReportPublishActionType;
+  reportId: string;
+  studentId: string;
+  studentName: string;
+  admissionNo: string;
+  guardianEmail?: string;
+  className: string;
+  session: string;
+  term: AcademicTerm;
+  performedBy: string;
+  performedByRole: UserRole;
+  performedByUid: string;
+  performedAt: string;
+  feeClearedAtAction?: boolean;
+  details?: string;
 }

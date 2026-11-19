@@ -14,10 +14,14 @@ import {
   AlertCircle,
   Users,
   X,
+  Globe,
+  EyeOff,
+  RefreshCw,
 } from 'lucide-react';
 import {
   AcademicConfig,
   AcademicTerm,
+  PublishedReportSnapshot,
   SchoolSetting,
   StudentResultReview,
 } from '../../types';
@@ -30,6 +34,7 @@ import {
   QUICK_REPORT_COMMENTS,
   ReportCommentBoxType,
   saveReportCardCommentBoxToFirestore,
+  StudentFeeClearanceStatus,
 } from '../../services/academicService';
 import { processSignatureImageToDataUrl } from '../../services/brandingService';
 import { extractFriendlyError } from '../../services/schoolService';
@@ -45,6 +50,11 @@ interface ReportCardViewProps {
   term: AcademicTerm;
   section?: string;
   nextTermResumption?: string;
+  publishedSnapshot?: PublishedReportSnapshot | null;
+  feeClearance?: StudentFeeClearanceStatus;
+  isPublishing?: boolean;
+  onPublish?: () => Promise<void>;
+  onUnpublish?: () => Promise<void>;
   onPrint?: () => void;
   onReviewUpdated?: (review: StudentResultReview) => void;
 }
@@ -71,12 +81,28 @@ export const ReportCardView: React.FC<ReportCardViewProps> = ({
   term,
   section,
   nextTermResumption,
+  publishedSnapshot,
+  feeClearance,
+  isPublishing = false,
+  onPublish,
+  onUnpublish,
   onPrint,
   onReviewUpdated,
 }) => {
   const { role, currentUser, firebaseUser } = useAuth();
   const isLiveFirestore = Boolean(firebaseUser);
   const approvalStatus = result.review?.status || 'Draft';
+  const canPublishReports = role === 'director' || role === 'principal';
+  const isPublished = Boolean(publishedSnapshot?.isPublished);
+  const firstPublishedFormatted = formatCommentDate(
+    publishedSnapshot?.firstPublishedAt || publishedSnapshot?.publishedAt
+  );
+  const republishedAtFormatted = formatCommentDate(publishedSnapshot?.republishedAt);
+  const isRepublished =
+    isPublished && Number(publishedSnapshot?.publishCount || 0) > 1 && Boolean(republishedAtFormatted);
+  const feeGatedAndUnpaid = Boolean(
+    schoolSettings.requireFullFeesBeforePublishReport && feeClearance && !feeClearance.cleared
+  );
 
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
@@ -476,7 +502,7 @@ export const ReportCardView: React.FC<ReportCardViewProps> = ({
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#EEF4F0] text-[#2A583B] border border-[#C5D6CB]">
             <CheckCircle2 className="w-3.5 h-3.5" />
-            Official Approved Result
+            Approved
           </span>
         );
       case 'Submitted for Review':
@@ -497,7 +523,7 @@ export const ReportCardView: React.FC<ReportCardViewProps> = ({
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#FBF5E8] text-[#7D5A18] border border-[#E3CFA6]">
             <Clock className="w-3.5 h-3.5" />
-            Draft (Pending Approval)
+            Draft
           </span>
         );
     }
@@ -775,9 +801,85 @@ export const ReportCardView: React.FC<ReportCardViewProps> = ({
   return (
     <div className="space-y-4">
       {/* Action Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 no-print">
-        <div className="flex items-center gap-2">{getApprovalBadge()}</div>
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2.5 no-print">
+        <div className="flex flex-wrap items-center gap-2">
+          {getApprovalBadge()}
+
+          {isPublished && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#6B1020] text-[#DFC484] border border-[#B8913A]/50">
+              <Globe className="w-3.5 h-3.5" />
+              Published{firstPublishedFormatted ? ` • ${firstPublishedFormatted}` : ''}
+              {isRepublished ? ` (Republished ${republishedAtFormatted})` : ''}
+            </span>
+          )}
+
+          {!isPublished && publishedSnapshot && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#FAF8F4] text-[#5E5B56] border border-[#DDD5C7]">
+              <EyeOff className="w-3.5 h-3.5" />
+              Unpublished
+            </span>
+          )}
+
+          {feeGatedAndUnpaid && (
+            <span
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#FBF5E8] text-[#7D5A18] border border-[#E3CFA6]"
+              title="School fees must be fully paid before parents can open this report card."
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              {feeClearance?.hasFeeRecords
+                ? `Fees Unpaid (₦${feeClearance.outstanding.toLocaleString('en-NG')}) — Withheld from Parent`
+                : 'Fees Not Cleared — Withheld from Parent'}
+            </span>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {canPublishReports && onPublish && !isPublished && (
+            <button
+              type="button"
+              disabled={isPublishing || approvalStatus !== 'Approved'}
+              title={
+                approvalStatus !== 'Approved'
+                  ? 'Only Approved report cards can be published to parents.'
+                  : 'Save a frozen copy of this report card for parents to view'
+              }
+              onClick={onPublish}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[8px] bg-[#2A583B] hover:bg-[#20452E] text-white text-xs font-medium transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              {isPublishing ? 'Publishing...' : 'Publish to Parents'}
+            </button>
+          )}
+
+          {canPublishReports && onPublish && isPublished && (
+            <button
+              type="button"
+              disabled={isPublishing || approvalStatus !== 'Approved'}
+              title={
+                approvalStatus !== 'Approved'
+                  ? 'Report must remain Approved to republish.'
+                  : 'Update the frozen snapshot with the latest approved scores and comments'
+              }
+              onClick={onPublish}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-[8px] bg-[#2A583B] hover:bg-[#20452E] text-white text-xs font-medium transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isPublishing ? 'animate-spin' : ''}`} />
+              {isPublishing ? 'Updating...' : 'Republish'}
+            </button>
+          )}
+
+          {canPublishReports && onUnpublish && isPublished && (
+            <button
+              type="button"
+              disabled={isPublishing}
+              onClick={onUnpublish}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-[8px] bg-[#FAF0F2] hover:bg-[#F3E1E5] border border-[#E2C1C5] text-[#86222E] text-xs font-medium transition-colors duration-150 disabled:opacity-50"
+            >
+              <EyeOff className="w-3.5 h-3.5" />
+              Unpublish
+            </button>
+          )}
+
           <button
             type="button"
             disabled={isDownloadingPdf}
@@ -812,6 +914,15 @@ export const ReportCardView: React.FC<ReportCardViewProps> = ({
           </button>
         </div>
       </div>
+
+      {canPublishReports && approvalStatus !== 'Approved' && !isPublished && (
+        <div className="px-3.5 py-2 rounded-[8px] bg-[#FBF5E8] border border-[#E3CFA6] text-[11px] text-[#7D5A18] flex items-center gap-2 no-print">
+          <Clock className="w-3.5 h-3.5 shrink-0" />
+          <span>
+            Status is <strong>{approvalStatus}</strong>. Approve this report card (below or in Class Summary &amp; Review) before publishing to parents.
+          </span>
+        </div>
+      )}
 
       {/* Feedback Banner */}
       {feedback && (
@@ -937,7 +1048,11 @@ export const ReportCardView: React.FC<ReportCardViewProps> = ({
             </div>
             <div>
               <span className="text-[#6E6A63] block font-medium">Result Status:</span>
-              <strong className="text-[#2A2A2E]">{approvalStatus}</strong>
+              <strong className="text-[#2A2A2E]">
+                {isPublished
+                  ? `Published${firstPublishedFormatted ? ` (${firstPublishedFormatted})` : ''}`
+                  : approvalStatus}
+              </strong>
             </div>
           </div>
         </div>

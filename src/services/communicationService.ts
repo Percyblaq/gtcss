@@ -15,6 +15,7 @@ import { handleFirestoreError, OperationType } from '../firebase/errorHandler';
 import {
   AcademicTerm,
   Announcement,
+  AnnouncementComment,
   CalendarEventType,
   SchoolCalendarEvent,
   UserRole,
@@ -266,6 +267,94 @@ export async function deleteAnnouncementFromFirestore(announcementId: string): P
     await deleteDoc(doc(db, 'announcements', announcementId));
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, `announcements/${announcementId}`);
+  }
+}
+
+// ==================== ANNOUNCEMENT COMMENTS ====================
+
+export function subscribeAnnouncementComments(
+  announcementId: string,
+  onData: (comments: AnnouncementComment[]) => void,
+  onError: (msg: string) => void
+): Unsubscribe {
+  const commentsRef = collection(db, 'announcements', announcementId, 'comments');
+  return onSnapshot(
+    commentsRef,
+    (snap) => {
+      const list = snap.docs.map((d) => ({
+        ...(d.data() as AnnouncementComment),
+        id: d.id,
+      }));
+      list.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+      onData(list);
+    },
+    (err) => {
+      try {
+        handleFirestoreError(err, OperationType.LIST, `announcements/${announcementId}/comments`);
+      } catch (w) {
+        onError(extractFriendlyError(w, 'Failed to load announcement comments.'));
+      }
+    }
+  );
+}
+
+export async function addAnnouncementCommentToFirestore(params: {
+  announcementId: string;
+  authorUid: string;
+  authorName: string;
+  authorRole: UserRole;
+  body: string;
+}): Promise<AnnouncementComment> {
+  const trimmedBody = params.body.trim();
+  if (!trimmedBody) {
+    throw new Error('Please enter a comment before posting.');
+  }
+  if (trimmedBody.length > 1000) {
+    throw new Error('Comments must be 1,000 characters or fewer.');
+  }
+  if (!params.authorUid) {
+    throw new Error('You must be signed in to post a comment.');
+  }
+
+  const now = new Date().toISOString();
+  const suffix = Math.random().toString(36).slice(2, 8) || 'cmt';
+  const commentId = `cmt_${Date.now()}_${suffix}`.slice(0, 128);
+  const safeName = (params.authorName || 'Portal User').trim().slice(0, 100) || 'Portal User';
+
+  const payload: AnnouncementComment = {
+    id: commentId,
+    announcementId: params.announcementId,
+    authorUid: params.authorUid,
+    authorName: safeName,
+    authorRole: params.authorRole,
+    body: trimmedBody,
+    createdAt: now,
+  };
+
+  try {
+    await setDoc(doc(db, 'announcements', params.announcementId, 'comments', commentId), payload);
+    return payload;
+  } catch (err) {
+    handleFirestoreError(
+      err,
+      OperationType.CREATE,
+      `announcements/${params.announcementId}/comments/${commentId}`
+    );
+  }
+}
+
+export async function deleteAnnouncementCommentFromFirestore(
+  announcementId: string,
+  commentId: string
+): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'announcements', announcementId, 'comments', commentId));
+  } catch (err) {
+    handleFirestoreError(
+      err,
+      OperationType.DELETE,
+      `announcements/${announcementId}/comments/${commentId}`
+    );
   }
 }
 

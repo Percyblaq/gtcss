@@ -22,6 +22,15 @@ import {
   Pencil,
   Database,
   ChevronDown,
+  Globe,
+  History,
+  Clock,
+  Users,
+  Eye,
+  Lock,
+  GraduationCap,
+  Mail,
+  ArrowLeft,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -30,10 +39,14 @@ import {
   AcademicSession,
   AcademicTerm,
   AttendanceRecord,
+  FeePayment,
+  PublishedReportSnapshot,
   RankingPolicy,
+  ReportPublishAuditLog,
   SchoolClass,
   SchoolSection,
   Student,
+  StudentFee,
   StudentResultReview,
   SubjectTeacherAssignment,
   Teacher,
@@ -47,13 +60,18 @@ import {
 } from '../data/sampleData';
 import { extractFriendlyError, subscribeStudents, subscribeTeachers } from '../services/schoolService';
 import { subscribeAttendance } from '../services/attendanceService';
+import { subscribeFeePayments, subscribeStudentFees } from '../services/feesService';
 import {
   batchApproveClassResultsInFirestore,
+  buildPublishedReportId,
   buildSubjectAssignmentId,
   computeClassResultsSummary,
   computeGradeFromConfig,
+  computeStudentFeeClearance,
   ComputedStudentResult,
   formatOrdinal,
+  publishMultipleReportCardsToFirestore,
+  publishSingleReportCardToFirestore,
   removeSubjectAssignmentFromFirestore,
   saveAcademicConfigToFirestore,
   saveAcademicSessionToFirestore,
@@ -62,13 +80,17 @@ import {
   saveStudentResultReviewToFirestore,
   saveSubjectAssignmentToFirestore,
   saveSubjectScoresBatchToFirestore,
+  StudentFeeClearanceStatus,
   subscribeAcademicConfig,
   subscribeAcademicRecords,
   subscribeAcademicSessions,
   subscribeClasses,
+  subscribePublishedReports,
+  subscribeReportPublishAuditLogs,
   subscribeResultReviews,
   subscribeSubjectAssignments,
   syncStandardClassesToFirestore,
+  unpublishReportCardFromFirestore,
 } from '../services/academicService';
 import {
   doesStudentBelongToClass,
@@ -81,6 +103,7 @@ import {
   SECTION_LABELS,
 } from '../utils/classUtils';
 import { ReportCardView } from '../components/academics/ReportCardView';
+import { PublishedReportSnapshotCard } from '../components/academics/PublishedReportSnapshotCard';
 
 type AcademicTab = 'scores' | 'summary' | 'reports' | 'classes' | 'sessions' | 'config';
 
@@ -119,6 +142,10 @@ export const AcademicsPage: React.FC<AcademicsPageProps> = ({ onRegisterLeaveGua
   const [academicRecords, setAcademicRecords] = useState<AcademicRecord[]>([]);
   const [resultReviews, setResultReviews] = useState<StudentResultReview[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+  const [publishedReports, setPublishedReports] = useState<PublishedReportSnapshot[]>([]);
+  const [publishAuditLogs, setPublishAuditLogs] = useState<ReportPublishAuditLog[]>([]);
+  const [studentFees, setStudentFees] = useState<StudentFee[]>([]);
+  const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
 
   const [isLoading, setIsLoading] = useState<boolean>(isLiveFirestore);
   const [dataError, setDataError] = useState<string>('');
@@ -129,6 +156,10 @@ export const AcademicsPage: React.FC<AcademicsPageProps> = ({ onRegisterLeaveGua
     if (!firebaseUser) {
       setStudentsList([]);
       setTeachersList([]);
+      setPublishedReports([]);
+      setPublishAuditLogs([]);
+      setStudentFees([]);
+      setFeePayments([]);
       setIsLoading(false);
       return;
     }
@@ -183,6 +214,37 @@ export const AcademicsPage: React.FC<AcademicsPageProps> = ({ onRegisterLeaveGua
       setAttendanceRecords,
       setDataError
     );
+    const u10 =
+      isAdmin || role === 'head_teacher' || isParent
+        ? subscribePublishedReports(
+            role,
+            currentUser,
+            firebaseUser.email,
+            setPublishedReports,
+            setDataError
+          )
+        : (() => {
+            setPublishedReports([]);
+            return () => {};
+          })();
+    const u11 = isAdmin
+      ? subscribeReportPublishAuditLogs(role, setPublishAuditLogs, setDataError)
+      : (() => {
+          setPublishAuditLogs([]);
+          return () => {};
+        })();
+    const u12 = isAdmin
+      ? subscribeStudentFees(role, currentUser, firebaseUser.email, setStudentFees, setDataError)
+      : (() => {
+          setStudentFees([]);
+          return () => {};
+        })();
+    const u13 = isAdmin
+      ? subscribeFeePayments(role, currentUser, firebaseUser.email, setFeePayments, setDataError)
+      : (() => {
+          setFeePayments([]);
+          return () => {};
+        })();
 
     return () => {
       u1();
@@ -194,8 +256,12 @@ export const AcademicsPage: React.FC<AcademicsPageProps> = ({ onRegisterLeaveGua
       u7();
       u8();
       u9();
+      u10();
+      u11();
+      u12();
+      u13();
     };
-  }, [firebaseUser, role, currentUser, isParent]);
+  }, [firebaseUser, role, currentUser, isParent, isAdmin]);
 
   useEffect(() => {
     if (!successMsg) return;
@@ -1117,6 +1183,295 @@ export const AcademicsPage: React.FC<AcademicsPageProps> = ({ onRegisterLeaveGua
     computedClassResults,
   ]);
 
+  // ==================== REPORT CARD PUBLISHING STATE & HANDLERS ====================
+  const isDirector = role === 'director';
+  const [isPublishingReport, setIsPublishingReport] = useState<boolean>(false);
+  const [isPublishSelectedModalOpen, setIsPublishSelectedModalOpen] = useState<boolean>(false);
+  const [publishSelectedStudentIds, setPublishSelectedStudentIds] = useState<string[]>([]);
+  const [isPublishClassConfirmOpen, setIsPublishClassConfirmOpen] = useState<boolean>(false);
+  const [isPublishAuditModalOpen, setIsPublishAuditModalOpen] = useState<boolean>(false);
+  const [isTestAsParentModalOpen, setIsTestAsParentModalOpen] = useState<boolean>(false);
+  const [testParentEmailInput, setTestParentEmailInput] = useState<string>('');
+  const [testParentPreviewSnapshot, setTestParentPreviewSnapshot] =
+    useState<PublishedReportSnapshot | null>(null);
+
+  const publishedSnapshotsByReportId = useMemo(() => {
+    const map = new Map<string, PublishedReportSnapshot>();
+    publishedReports.forEach((snap) => {
+      map.set(snap.id, snap);
+      map.set(buildPublishedReportId(snap.session, snap.term, snap.studentId), snap);
+    });
+    return map;
+  }, [publishedReports]);
+
+  const feeClearanceByStudentId = useMemo(() => {
+    const map = new Map<string, StudentFeeClearanceStatus>();
+    computedClassResults.forEach((res) => {
+      map.set(
+        res.student.id,
+        computeStudentFeeClearance({
+          student: res.student,
+          session: selectedSession,
+          term: selectedTerm,
+          studentFees,
+          feePayments,
+        })
+      );
+    });
+    return map;
+  }, [computedClassResults, selectedSession, selectedTerm, studentFees, feePayments]);
+
+  const classPublishSummary = useMemo(() => {
+    let approved = 0;
+    let published = 0;
+    let approvedUnpublished = 0;
+    let draftOrPending = 0;
+
+    computedClassResults.forEach((res) => {
+      const reportId = buildPublishedReportId(selectedSession, selectedTerm, res.student.id);
+      const snap = publishedSnapshotsByReportId.get(reportId);
+      const isPub = Boolean(snap?.isPublished);
+      const isApp = res.review?.status === 'Approved';
+      if (isPub) published += 1;
+      if (isApp) {
+        approved += 1;
+        if (!isPub) approvedUnpublished += 1;
+      } else {
+        draftOrPending += 1;
+      }
+    });
+
+    return {
+      total: computedClassResults.length,
+      approved,
+      published,
+      approvedUnpublished,
+      draftOrPending,
+    };
+  }, [computedClassResults, publishedSnapshotsByReportId, selectedSession, selectedTerm]);
+
+  const formatShortPublishDate = (iso?: string): string => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+    return d.toLocaleDateString('en-NG', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
+
+  const getStudentReportStatusTag = (studentId: string): string => {
+    const reportId = buildPublishedReportId(selectedSession, selectedTerm, studentId);
+    const snap = publishedSnapshotsByReportId.get(reportId);
+    if (snap?.isPublished) {
+      const dateStr = formatShortPublishDate(snap.firstPublishedAt || snap.publishedAt);
+      return dateStr ? `Published • ${dateStr}` : 'Published';
+    }
+    const res = computedClassResults.find((r) => r.student.id === studentId);
+    return res?.review?.status || 'Draft';
+  };
+
+  const activeReportSnapshot = useMemo(() => {
+    if (!activeReportResult) return null;
+    const reportId = buildPublishedReportId(
+      selectedSession,
+      selectedTerm,
+      activeReportResult.student.id
+    );
+    return publishedSnapshotsByReportId.get(reportId) || null;
+  }, [activeReportResult, publishedSnapshotsByReportId, selectedSession, selectedTerm]);
+
+  const activeReportFeeClearance = useMemo(() => {
+    if (!activeReportResult) return undefined;
+    return feeClearanceByStudentId.get(activeReportResult.student.id);
+  }, [activeReportResult, feeClearanceByStudentId]);
+
+  const activeNextTermResumption = useMemo(
+    () =>
+      activeSessionObj.terms.find((t) => t.name === selectedTerm)?.nextTermResumption ||
+      schoolSettings.nextTermResumption,
+    [activeSessionObj, selectedTerm, schoolSettings.nextTermResumption]
+  );
+
+  const handlePublishSingleReport = async (res: ComputedStudentResult) => {
+    if (!isAdmin || !firebaseUser) return;
+    if (res.review?.status !== 'Approved') {
+      setDataError(
+        `Cannot publish ${res.student.fullName}'s report card while status is "${res.review?.status || 'Draft'}". Approve the report card first.`
+      );
+      return;
+    }
+
+    const reportId = buildPublishedReportId(selectedSession, selectedTerm, res.student.id);
+    const existing = publishedSnapshotsByReportId.get(reportId) || null;
+    const actorName = currentUser?.displayName || firebaseUser.email || 'Admin';
+
+    setIsPublishingReport(true);
+    setDataError('');
+    try {
+      const outcome = await publishSingleReportCardToFirestore({
+        result: res,
+        existingSnapshot: existing,
+        schoolSettings,
+        config,
+        session: selectedSession,
+        term: selectedTerm,
+        section: selectedClassObj?.section,
+        nextTermResumption: activeNextTermResumption,
+        studentFees,
+        feePayments,
+        actorName,
+        actorRole: role,
+        actorUid: firebaseUser.uid,
+      });
+
+      const actionWord = outcome.isRepublish ? 'Republished' : 'Published';
+      const feeNote =
+        schoolSettings.requireFullFeesBeforePublishReport && !outcome.feeClearance.cleared
+          ? ' Note: Student has an unpaid fee balance, so parent view will show the fee clearance notice until settled.'
+          : '';
+
+      setSuccessMsg(
+        `${actionWord} frozen report card snapshot for ${res.student.fullName} (${selectedTerm}, ${selectedSession}).${feeNote}`
+      );
+    } catch (err) {
+      console.error('Publish single report card failed:', err);
+      setDataError(extractFriendlyError(err, 'Failed to publish report card to parents.'));
+    } finally {
+      setIsPublishingReport(false);
+    }
+  };
+
+  const handleUnpublishSingleReport = async (snapshot: PublishedReportSnapshot) => {
+    if (!isAdmin || !firebaseUser) return;
+    const actorName = currentUser?.displayName || firebaseUser.email || 'Admin';
+
+    setIsPublishingReport(true);
+    setDataError('');
+    try {
+      await unpublishReportCardFromFirestore({
+        existingSnapshot: snapshot,
+        actorName,
+        actorRole: role,
+        actorUid: firebaseUser.uid,
+      });
+      setSuccessMsg(
+        `Unpublished report card for ${snapshot.studentName} (${snapshot.term}, ${snapshot.session}). Parents can no longer view it.`
+      );
+    } catch (err) {
+      console.error('Unpublish report card failed:', err);
+      setDataError(extractFriendlyError(err, 'Failed to unpublish report card.'));
+    } finally {
+      setIsPublishingReport(false);
+    }
+  };
+
+  const handleOpenPublishSelectedModal = () => {
+    const approvedIds = computedClassResults
+      .filter((r) => r.review?.status === 'Approved')
+      .map((r) => r.student.id);
+    setPublishSelectedStudentIds(approvedIds);
+    setIsPublishSelectedModalOpen(true);
+  };
+
+  const handleConfirmPublishSelected = async () => {
+    if (!isAdmin || !firebaseUser) return;
+    const targets = computedClassResults.filter((r) =>
+      publishSelectedStudentIds.includes(r.student.id)
+    );
+    if (targets.length === 0) {
+      setDataError('Select at least one Approved student report card to publish.');
+      return;
+    }
+
+    const actorName = currentUser?.displayName || firebaseUser.email || 'Admin';
+    setIsPublishingReport(true);
+    setDataError('');
+    try {
+      const outcome = await publishMultipleReportCardsToFirestore({
+        results: targets,
+        existingSnapshotsByReportId: publishedSnapshotsByReportId,
+        schoolSettings,
+        config,
+        session: selectedSession,
+        term: selectedTerm,
+        section: selectedClassObj?.section,
+        nextTermResumption: activeNextTermResumption,
+        studentFees,
+        feePayments,
+        actorName,
+        actorRole: role,
+        actorUid: firebaseUser.uid,
+      });
+
+      const parts: string[] = [];
+      if (outcome.publishedCount > 0) parts.push(`${outcome.publishedCount} published`);
+      if (outcome.republishedCount > 0) parts.push(`${outcome.republishedCount} republished`);
+      if (outcome.skippedUnapprovedCount > 0) {
+        parts.push(`${outcome.skippedUnapprovedCount} unapproved skipped`);
+      }
+      if (outcome.withheldForFeesCount > 0) {
+        parts.push(`${outcome.withheldForFeesCount} withheld pending fee clearance`);
+      }
+
+      setSuccessMsg(
+        `Report card batch complete for ${selectedClass} (${selectedTerm}): ${parts.join(', ')}.`
+      );
+      setIsPublishSelectedModalOpen(false);
+    } catch (err) {
+      console.error('Publish selected report cards failed:', err);
+      setDataError(extractFriendlyError(err, 'Failed to publish selected report cards.'));
+    } finally {
+      setIsPublishingReport(false);
+    }
+  };
+
+  const handleConfirmPublishWholeClass = async () => {
+    if (!isAdmin || !firebaseUser) return;
+    const actorName = currentUser?.displayName || firebaseUser.email || 'Admin';
+
+    setIsPublishingReport(true);
+    setDataError('');
+    try {
+      const outcome = await publishMultipleReportCardsToFirestore({
+        results: computedClassResults,
+        existingSnapshotsByReportId: publishedSnapshotsByReportId,
+        schoolSettings,
+        config,
+        session: selectedSession,
+        term: selectedTerm,
+        section: selectedClassObj?.section,
+        nextTermResumption: activeNextTermResumption,
+        studentFees,
+        feePayments,
+        actorName,
+        actorRole: role,
+        actorUid: firebaseUser.uid,
+      });
+
+      const parts: string[] = [];
+      if (outcome.publishedCount > 0) parts.push(`${outcome.publishedCount} newly published`);
+      if (outcome.republishedCount > 0) parts.push(`${outcome.republishedCount} republished`);
+      if (outcome.skippedUnapprovedCount > 0) {
+        parts.push(`${outcome.skippedUnapprovedCount} draft/unapproved skipped`);
+      }
+      if (outcome.withheldForFeesCount > 0) {
+        parts.push(`${outcome.withheldForFeesCount} withheld for unpaid fees`);
+      }
+
+      setSuccessMsg(
+        `Published whole class (${selectedClass}, ${selectedTerm}): ${parts.join(', ')}.`
+      );
+      setIsPublishClassConfirmOpen(false);
+    } catch (err) {
+      console.error('Publish whole class report cards failed:', err);
+      setDataError(extractFriendlyError(err, 'Failed to publish class report cards.'));
+    } finally {
+      setIsPublishingReport(false);
+    }
+  };
+
   // ==================== TAB 4: CLASSES, SUBJECTS & TEACHER ASSIGNMENTS ====================
   const [isClassModalOpen, setIsClassModalOpen] = useState(false);
   const [classForm, setClassForm] = useState<{
@@ -1839,7 +2194,7 @@ export const AcademicsPage: React.FC<AcademicsPageProps> = ({ onRegisterLeaveGua
                 >
                   {(isParent ? scopedStudents : activeStudentsInClass).map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.fullName} ({s.admissionNo})
+                      {s.fullName} ({s.admissionNo}) — {getStudentReportStatusTag(s.id)}
                     </option>
                   ))}
                 </select>
@@ -2292,19 +2647,39 @@ export const AcademicsPage: React.FC<AcademicsPageProps> = ({ onRegisterLeaveGua
                             : '0 days'}
                         </td>
                         <td className="py-3.5 px-3 text-center">
-                          <span
-                            className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium border ${
-                              res.review?.status === 'Approved'
-                                ? 'bg-[#EEF4F0] text-[#2A583B] border-[#C5D6CB]'
-                                : res.review?.status === 'Submitted for Review'
-                                ? 'bg-[#FAF0F2] text-[#6B1020] border-[#DFC7CA]'
-                                : res.review?.status === 'Returned for Correction'
-                                ? 'bg-[#FAF0F2] text-[#86222E] border-[#E2C1C5]'
-                                : 'bg-[#FAF8F4] text-[#5E5B56] border-[#DDD5C7]'
-                            }`}
-                          >
-                            {res.review?.status || 'Draft'}
-                          </span>
+                          <div className="inline-flex flex-col items-center gap-1">
+                            <span
+                              className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium border ${
+                                res.review?.status === 'Approved'
+                                  ? 'bg-[#EEF4F0] text-[#2A583B] border-[#C5D6CB]'
+                                  : res.review?.status === 'Submitted for Review'
+                                  ? 'bg-[#FAF0F2] text-[#6B1020] border-[#DFC7CA]'
+                                  : res.review?.status === 'Returned for Correction'
+                                  ? 'bg-[#FAF0F2] text-[#86222E] border-[#E2C1C5]'
+                                  : 'bg-[#FAF8F4] text-[#5E5B56] border-[#DDD5C7]'
+                              }`}
+                            >
+                              {res.review?.status || 'Draft'}
+                            </span>
+                            {(() => {
+                              const rid = buildPublishedReportId(
+                                selectedSession,
+                                selectedTerm,
+                                res.student.id
+                              );
+                              const snap = publishedSnapshotsByReportId.get(rid);
+                              if (!snap?.isPublished) return null;
+                              const pubDate = formatShortPublishDate(
+                                snap.firstPublishedAt || snap.publishedAt
+                              );
+                              return (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#6B1020] text-[#DFC484]">
+                                  <Globe className="w-2.5 h-2.5" />
+                                  Published{pubDate ? ` • ${pubDate}` : ''}
+                                </span>
+                              );
+                            })()}
+                          </div>
                         </td>
                         <td className="py-3.5 px-4 text-right no-print">
                           <div className="inline-flex items-center gap-1.5">
@@ -2339,7 +2714,93 @@ export const AcademicsPage: React.FC<AcademicsPageProps> = ({ onRegisterLeaveGua
 
       {/* ==================== TAB 3: INDIVIDUAL REPORT CARDS ==================== */}
       {activeTab === 'reports' && (
-        <div>
+        <div className="space-y-4">
+          {isAdmin && (
+            <div className="bg-white rounded-[10px] border border-[#E6DFD3] p-4 shadow-[0_1px_2px_rgba(42,42,46,0.04)] flex flex-wrap items-center justify-between gap-3 no-print">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="font-semibold text-[#2A2A2E] flex items-center gap-1.5">
+                    <Globe className="w-4 h-4 text-[#6B1020]" />
+                    Parent Publishing — {selectedClass} ({selectedTerm})
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-[#FBF5E8] text-[#7D5A18] border border-[#E3CFA6]">
+                    Draft / Pending: {classPublishSummary.draftOrPending}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-[#EEF4F0] text-[#2A583B] border border-[#C5D6CB]">
+                    Approved: {classPublishSummary.approved}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-[#6B1020] text-[#DFC484]">
+                    Published: {classPublishSummary.published}
+                  </span>
+                </div>
+                {schoolSettings.requireFullFeesBeforePublishReport && (
+                  <p className="text-[11px] text-[#7D5A18]">
+                    Fee clearance lock enabled in Settings: published reports are withheld from parents while school fees remain unpaid.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {computedClassResults.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isPublishingReport || classPublishSummary.approved === 0}
+                      title={
+                        classPublishSummary.approved === 0
+                          ? 'Approve at least one student report before publishing'
+                          : 'Choose specific Approved students to publish or republish'
+                      }
+                      onClick={handleOpenPublishSelectedModal}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] bg-white hover:bg-[#FAF8F4] border border-[#DDD5C7] text-[#2A2A2E] text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <CheckSquare className="w-3.5 h-3.5 text-[#6B1020]" />
+                      Publish Selected
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isPublishingReport || classPublishSummary.approved === 0}
+                      title={
+                        classPublishSummary.approved === 0
+                          ? 'Approve at least one student report before publishing'
+                          : 'Publish all Approved reports in this class to parents'
+                      }
+                      onClick={() => setIsPublishClassConfirmOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] bg-[#2A583B] hover:bg-[#20452E] text-white text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Users className="w-3.5 h-3.5" />
+                      Publish Whole Class ({classPublishSummary.approved})
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsPublishAuditModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] bg-[#FAF8F4] hover:bg-[#FAF0F2] border border-[#E6DFD3] text-[#6B1020] text-xs font-medium transition-colors"
+                >
+                  <History className="w-3.5 h-3.5" />
+                  Publish Audit Log ({publishAuditLogs.length})
+                </button>
+                {isDirector && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTestParentEmailInput(
+                        activeReportResult?.student.guardianEmail || ''
+                      );
+                      setTestParentPreviewSnapshot(null);
+                      setIsTestAsParentModalOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] bg-[#FBF5E8] hover:bg-[#F4E9D0] border border-[#E3CFA6] text-[#7D5A18] text-xs font-medium transition-colors"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    Test as Parent
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {activeReportResult ? (
             <ReportCardView
               result={activeReportResult}
@@ -2349,8 +2810,17 @@ export const AcademicsPage: React.FC<AcademicsPageProps> = ({ onRegisterLeaveGua
               session={selectedSession}
               term={selectedTerm}
               section={selectedClassObj?.section}
-              nextTermResumption={
-                activeSessionObj.terms.find((t) => t.name === selectedTerm)?.nextTermResumption
+              nextTermResumption={activeNextTermResumption}
+              publishedSnapshot={activeReportSnapshot}
+              feeClearance={activeReportFeeClearance}
+              isPublishing={isPublishingReport}
+              onPublish={
+                isAdmin ? () => handlePublishSingleReport(activeReportResult) : undefined
+              }
+              onUnpublish={
+                isAdmin && activeReportSnapshot
+                  ? () => handleUnpublishSingleReport(activeReportSnapshot)
+                  : undefined
               }
               onReviewUpdated={(updatedReview) => {
                 setResultReviews((prev) => {
@@ -3509,6 +3979,655 @@ export const AcademicsPage: React.FC<AcademicsPageProps> = ({ onRegisterLeaveGua
           </div>
         </div>
       )}
+
+      {/* ==================== MODAL: PUBLISH SELECTED REPORT CARDS ==================== */}
+      {isAdmin && isPublishSelectedModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#2A2A2E]/60 backdrop-blur-xs no-print">
+          <div className="bg-white rounded-[10px] max-w-2xl w-full shadow-[0_12px_36px_rgba(42,42,46,0.18)] border border-[#E6DFD3] flex flex-col max-h-[85vh] overflow-hidden">
+            <div className="px-6 py-4 bg-[#FAF8F4] border-b border-[#E6DFD3] flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold text-base text-[#2A2A2E] flex items-center gap-2">
+                  <Globe className="w-4 h-4 text-[#6B1020]" />
+                  Publish Selected Report Cards — {selectedClass}
+                </h3>
+                <p className="text-xs text-[#5E5B56] mt-0.5">
+                  {selectedTerm} • {selectedSession} • Only Approved report cards can be selected for publishing.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={isPublishingReport}
+                onClick={() => setIsPublishSelectedModalOpen(false)}
+                className="p-1.5 rounded-[8px] text-[#7F7A72] hover:text-[#2A2A2E] hover:bg-[#EFE9DF]"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="px-6 py-3 border-b border-[#EFE9DF] flex flex-wrap items-center justify-between gap-2 text-xs bg-white">
+              <span className="font-medium text-[#5E5B56]">
+                {publishSelectedStudentIds.length} of {classPublishSummary.approved} Approved student
+                {classPublishSummary.approved === 1 ? '' : 's'} selected
+              </span>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPublishSelectedStudentIds(
+                      computedClassResults
+                        .filter((r) => r.review?.status === 'Approved')
+                        .map((r) => r.student.id)
+                    )
+                  }
+                  className="font-semibold text-[#6B1020] hover:underline"
+                >
+                  Select All Approved
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPublishSelectedStudentIds([])}
+                  className="font-medium text-[#5E5B56] hover:underline"
+                >
+                  Clear Selection
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-2 text-xs">
+              {computedClassResults.map((res) => {
+                const isApproved = res.review?.status === 'Approved';
+                const reportId = buildPublishedReportId(selectedSession, selectedTerm, res.student.id);
+                const snap = publishedSnapshotsByReportId.get(reportId);
+                const isAlreadyPub = Boolean(snap?.isPublished);
+                const clearance = feeClearanceByStudentId.get(res.student.id);
+                const checked = publishSelectedStudentIds.includes(res.student.id);
+
+                return (
+                  <label
+                    key={res.student.id}
+                    className={`flex flex-wrap items-center justify-between gap-3 p-3 rounded-[8px] border transition-colors ${
+                      !isApproved
+                        ? 'bg-[#FAF8F4]/70 border-[#E6DFD3] opacity-65 cursor-not-allowed'
+                        : checked
+                          ? 'bg-[#FAF0F2]/60 border-[#DFC7CA] cursor-pointer'
+                          : 'bg-white border-[#E6DFD3] hover:bg-[#FAF8F4] cursor-pointer'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <input
+                        type="checkbox"
+                        disabled={!isApproved || isPublishingReport}
+                        checked={checked}
+                        onChange={() => {
+                          if (!isApproved) return;
+                          setPublishSelectedStudentIds((prev) =>
+                            prev.includes(res.student.id)
+                              ? prev.filter((id) => id !== res.student.id)
+                              : [...prev, res.student.id]
+                          );
+                        }}
+                        className="w-4 h-4 accent-[#6B1020] shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <p className="font-semibold text-[#2A2A2E] truncate">
+                          {res.student.fullName}
+                        </p>
+                        <p className="text-[11px] text-[#6E6A63] font-mono">
+                          {res.student.admissionNo} • Avg:{' '}
+                          {res.subjectsCount > 0 ? `${res.averagePercentage}%` : '—'} •{' '}
+                          {res.student.guardianEmail || 'No parent email'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                      {schoolSettings.requireFullFeesBeforePublishReport &&
+                        clearance &&
+                        !clearance.cleared && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#FBF5E8] text-[#7D5A18] border border-[#E3CFA6]">
+                            Fees Unpaid
+                          </span>
+                        )}
+                      {isAlreadyPub ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#6B1020] text-[#DFC484]">
+                          Published (Will Republish)
+                        </span>
+                      ) : isApproved ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#EEF4F0] text-[#2A583B] border border-[#C5D6CB]">
+                          Approved • Ready
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#FAF8F4] text-[#5E5B56] border border-[#DDD5C7]">
+                          {res.review?.status || 'Draft'} (Approve first)
+                        </span>
+                      )}
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="px-6 py-4 bg-[#FAF8F4] border-t border-[#E6DFD3] flex flex-wrap items-center justify-end gap-2 text-xs">
+              <button
+                type="button"
+                disabled={isPublishingReport}
+                onClick={() => setIsPublishSelectedModalOpen(false)}
+                className="px-4 py-2 rounded-[8px] bg-white hover:bg-[#FAF8F4] border border-[#DDD5C7] text-[#2A2A2E] font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isPublishingReport || publishSelectedStudentIds.length === 0}
+                onClick={handleConfirmPublishSelected}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[8px] bg-[#2A583B] hover:bg-[#20452E] text-white font-medium disabled:opacity-50"
+              >
+                <Globe className="w-3.5 h-3.5" />
+                {isPublishingReport
+                  ? 'Publishing...'
+                  : `Publish ${publishSelectedStudentIds.length} Selected Report${publishSelectedStudentIds.length === 1 ? '' : 's'}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL: CONFIRM PUBLISH WHOLE CLASS ==================== */}
+      {isAdmin && isPublishClassConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#2A2A2E]/60 backdrop-blur-xs no-print">
+          <div className="bg-white rounded-[10px] max-w-md w-full p-6 shadow-[0_12px_36px_rgba(42,42,46,0.18)] border border-[#E6DFD3] space-y-4">
+            <div className="flex items-start justify-between gap-3 pb-3 border-b border-[#EFE9DF]">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-[10px] bg-[#EEF4F0] text-[#2A583B] border border-[#C5D6CB] flex items-center justify-center shrink-0">
+                  <Globe className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-base text-[#2A2A2E]">
+                    Publish Whole Class to Parents
+                  </h3>
+                  <p className="text-xs text-[#5E5B56]">
+                    {selectedClass} • {selectedTerm} ({selectedSession})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isPublishingReport}
+                onClick={() => setIsPublishClassConfirmOpen(false)}
+                className="p-1 rounded-[8px] text-[#7F7A72] hover:text-[#2A2A2E]"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-[#2A2A2E]">
+              <p className="leading-relaxed">
+                This will save frozen official report card snapshots for all{' '}
+                <strong>{classPublishSummary.approved} Approved</strong> student
+                {classPublishSummary.approved === 1 ? '' : 's'} in{' '}
+                <strong>{selectedClass}</strong> (updating any already-published reports).
+              </p>
+
+              {classPublishSummary.draftOrPending > 0 && (
+                <div className="p-3 rounded-[8px] bg-[#FBF5E8] border border-[#E3CFA6] text-[#7D5A18] flex items-start gap-2">
+                  <Clock className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>{classPublishSummary.draftOrPending}</strong> unapproved (Draft / Pending) student
+                    {classPublishSummary.draftOrPending === 1 ? '' : 's'} will be skipped automatically.
+                  </span>
+                </div>
+              )}
+
+              {schoolSettings.requireFullFeesBeforePublishReport && (
+                <div className="p-3 rounded-[8px] bg-[#FAF8F4] border border-[#E6DFD3] text-[#5E5B56]">
+                  Fee-gating setting is active: students with unpaid school fees will have their report card withheld in the Parent Portal until fees are settled.
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 text-xs">
+              <button
+                type="button"
+                disabled={isPublishingReport}
+                onClick={() => setIsPublishClassConfirmOpen(false)}
+                className="px-4 py-2 rounded-[8px] bg-white hover:bg-[#FAF8F4] border border-[#DDD5C7] text-[#2A2A2E] font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isPublishingReport || classPublishSummary.approved === 0}
+                onClick={handleConfirmPublishWholeClass}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[8px] bg-[#2A583B] hover:bg-[#20452E] text-white font-medium disabled:opacity-50"
+              >
+                <Globe className="w-3.5 h-3.5" />
+                {isPublishingReport
+                  ? 'Publishing Class...'
+                  : `Confirm Publish (${classPublishSummary.approved})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL: REPORT PUBLISH AUDIT LOG ==================== */}
+      {isAdmin && isPublishAuditModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#2A2A2E]/60 backdrop-blur-xs no-print">
+          <div className="bg-white rounded-[10px] max-w-3xl w-full shadow-[0_12px_36px_rgba(42,42,46,0.18)] border border-[#E6DFD3] flex flex-col max-h-[85vh] overflow-hidden">
+            <div className="px-6 py-4 bg-[#FAF8F4] border-b border-[#E6DFD3] flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold text-base text-[#2A2A2E] flex items-center gap-2">
+                  <History className="w-4 h-4 text-[#6B1020]" />
+                  Report Card Publishing Audit Log
+                </h3>
+                <p className="text-xs text-[#5E5B56] mt-0.5">
+                  Permanent record of who published, republished, or unpublished student report cards
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPublishAuditModalOpen(false)}
+                className="p-1.5 rounded-[8px] text-[#7F7A72] hover:text-[#2A2A2E] hover:bg-[#EFE9DF]"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+              {publishAuditLogs.length === 0 ? (
+                <div className="py-12 text-center text-xs text-[#7F7A72]">
+                  No report card publish, republish, or unpublish events recorded yet.
+                </div>
+              ) : (
+                <div className="overflow-x-auto border border-[#E6DFD3] rounded-[8px]">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-[#FAF8F4] border-b border-[#E6DFD3] text-[11px] font-semibold uppercase text-[#5E5B56]">
+                        <th className="py-2.5 px-3">Date &amp; Time</th>
+                        <th className="py-2.5 px-3">Action</th>
+                        <th className="py-2.5 px-3">Student</th>
+                        <th className="py-2.5 px-3">Class / Term</th>
+                        <th className="py-2.5 px-3">Performed By</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#EFE9DF]">
+                      {publishAuditLogs.slice(0, 100).map((log) => (
+                        <tr key={log.id} className="hover:bg-[#FAF8F4]">
+                          <td className="py-2.5 px-3 text-[11px] text-[#5E5B56] whitespace-nowrap tabular-nums">
+                            {new Date(log.performedAt).toLocaleString('en-NG', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span
+                              className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium capitalize ${
+                                log.action === 'published'
+                                  ? 'bg-[#EEF4F0] text-[#2A583B] border border-[#C5D6CB]'
+                                  : log.action === 'republished'
+                                    ? 'bg-[#FBF5E8] text-[#7D5A18] border border-[#E3CFA6]'
+                                    : 'bg-[#FAF0F2] text-[#86222E] border border-[#E2C1C5]'
+                              }`}
+                            >
+                              {log.action}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="font-semibold text-[#2A2A2E] block">
+                              {log.studentName}
+                            </span>
+                            <span className="text-[10px] font-mono text-[#6E6A63]">
+                              {log.admissionNo}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-[#5E5B56]">
+                            <span className="font-medium text-[#2A2A2E] block">
+                              {log.className}
+                            </span>
+                            <span className="text-[11px]">
+                              {log.term} ({log.session})
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="font-medium text-[#2A2A2E] block">
+                              {log.performedBy}
+                            </span>
+                            <span className="text-[10px] uppercase text-[#6E6A63]">
+                              {log.performedByRole}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-3 bg-[#FAF8F4] border-t border-[#E6DFD3] flex justify-end text-xs">
+              <button
+                type="button"
+                onClick={() => setIsPublishAuditModalOpen(false)}
+                className="px-4 py-2 rounded-[8px] bg-white hover:bg-[#FAF8F4] border border-[#DDD5C7] text-[#2A2A2E] font-medium"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL: DIRECTOR "TEST AS PARENT" CHECK ==================== */}
+      {isDirector && isTestAsParentModalOpen && (() => {
+        const normalizedTestEmail = testParentEmailInput.trim().toLowerCase();
+        const matchingStudents = normalizedTestEmail
+          ? studentsList
+              .filter((s) => (s.guardianEmail || '').trim().toLowerCase() === normalizedTestEmail)
+              .sort((a, b) => a.fullName.localeCompare(b.fullName))
+          : [];
+        const matchingSnapshots = normalizedTestEmail
+          ? publishedReports
+              .filter(
+                (r) =>
+                  r.isPublished === true &&
+                  (r.guardianEmail || '').trim().toLowerCase() === normalizedTestEmail
+              )
+              .sort((a, b) => {
+                const sCmp = b.session.localeCompare(a.session);
+                if (sCmp !== 0) return sCmp;
+                return (b.publishedAt || '').localeCompare(a.publishedAt || '');
+              })
+          : [];
+
+        const matchedStudentIds = new Set(matchingStudents.map((s) => s.id));
+        const orphanSnapshots = matchingSnapshots.filter((snap) => !matchedStudentIds.has(snap.studentId));
+        const quickSampleEmails = Array.from(
+          new Set(
+            activeStudentsInClass
+              .map((s) => (s.guardianEmail || '').trim().toLowerCase())
+              .filter(Boolean)
+          )
+        ).slice(0, 6);
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#2A2A2E]/60 backdrop-blur-xs no-print">
+            <div className="bg-white rounded-[10px] max-w-4xl w-full shadow-[0_12px_36px_rgba(42,42,46,0.18)] border border-[#E6DFD3] flex flex-col max-h-[88vh] overflow-hidden">
+              <div className="px-6 py-4 bg-[#FAF8F4] border-b border-[#E6DFD3] flex items-center justify-between gap-3 shrink-0">
+                <div>
+                  <h3 className="font-semibold text-base text-[#2A2A2E] flex items-center gap-2">
+                    <Eye className="w-4 h-4 text-[#6B1020]" />
+                    Test as Parent — Access Check
+                  </h3>
+                  <p className="text-xs text-[#5E5B56] mt-0.5">
+                    Enter any Parent Google Email to preview which children and published report cards that account would see.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTestParentPreviewSnapshot(null);
+                    setIsTestAsParentModalOpen(false);
+                  }}
+                  className="p-1.5 rounded-[8px] text-[#7F7A72] hover:text-[#2A2A2E] hover:bg-[#EFE9DF]"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-5 border-b border-[#EFE9DF] space-y-2.5 bg-white shrink-0">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <Mail className="w-4 h-4 text-[#7F7A72] absolute left-3 top-2.5" />
+                    <input
+                      type="email"
+                      value={testParentEmailInput}
+                      onChange={(e) => {
+                        setTestParentEmailInput(e.target.value);
+                        setTestParentPreviewSnapshot(null);
+                      }}
+                      placeholder="Type parent email (e.g. parent@gmail.com)..."
+                      className="w-full pl-9 pr-3 py-2 text-xs border border-[#DDD5C7] rounded-[8px] bg-[#FAF8F4] focus:bg-white text-[#2A2A2E] focus:ring-2 focus:ring-[#6B1020]/20 focus:border-[#6B1020] focus:outline-none"
+                    />
+                  </div>
+                  {testParentEmailInput && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTestParentEmailInput('');
+                        setTestParentPreviewSnapshot(null);
+                      }}
+                      className="px-3 py-2 rounded-[8px] border border-[#DDD5C7] bg-white hover:bg-[#FAF8F4] text-xs font-medium text-[#5E5B56]"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                {quickSampleEmails.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                    <span className="text-[#6E6A63] font-medium">
+                      Parent emails in {selectedClass}:
+                    </span>
+                    {quickSampleEmails.map((em) => (
+                      <button
+                        key={em}
+                        type="button"
+                        onClick={() => {
+                          setTestParentEmailInput(em);
+                          setTestParentPreviewSnapshot(null);
+                        }}
+                        className={`px-2 py-0.5 rounded-full border font-mono transition-colors ${
+                          normalizedTestEmail === em
+                            ? 'bg-[#6B1020] text-white border-[#6B1020]'
+                            : 'bg-[#FAF8F4] text-[#2A2A2E] border-[#E6DFD3] hover:border-[#6B1020]/50'
+                        }`}
+                      >
+                        {em}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-5 bg-[#F7F4EF]/60">
+                {testParentPreviewSnapshot ? (
+                  <div className="space-y-4">
+                    <button
+                      type="button"
+                      onClick={() => setTestParentPreviewSnapshot(null)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] bg-white hover:bg-[#FAF8F4] border border-[#DDD5C7] text-xs font-medium text-[#2A2A2E]"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5 text-[#6B1020]" />
+                      Back to Matched Children
+                    </button>
+                    <PublishedReportSnapshotCard
+                      snapshot={testParentPreviewSnapshot}
+                      schoolSettings={schoolSettings}
+                    />
+                  </div>
+                ) : !normalizedTestEmail ? (
+                  <div className="bg-white rounded-[10px] border border-[#E6DFD3] p-8 text-center text-xs text-[#6E6A63]">
+                    Enter a parent&apos;s Google email address above or pick one from {selectedClass} to check matched student profiles and published report cards.
+                  </div>
+                ) : matchingStudents.length === 0 && orphanSnapshots.length === 0 ? (
+                  <div className="bg-white rounded-[10px] border border-[#E6DFD3] p-8 text-center space-y-2">
+                    <p className="font-serif text-base font-semibold text-[#2A2A2E]">
+                      No students are linked to this email
+                    </p>
+                    <p className="text-xs text-[#5E5B56]">
+                      No student record or published snapshot has <span className="font-mono text-[#6B1020]">{normalizedTestEmail}</span> as Parent Email.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="font-semibold text-[#2A2A2E]">
+                        Matched for <span className="font-mono text-[#6B1020]">{normalizedTestEmail}</span>:
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-full bg-[#EEF4F0] text-[#2A583B] border border-[#C5D6CB] font-medium text-[11px]">
+                        {matchingStudents.length} Child{matchingStudents.length === 1 ? '' : 'ren'} •{' '}
+                        {matchingSnapshots.length} Published Report{matchingSnapshots.length === 1 ? '' : 's'}
+                      </span>
+                    </div>
+
+                    {matchingStudents.map((child) => {
+                      const childSnaps = matchingSnapshots.filter((r) => r.studentId === child.id);
+                      const hasCaseMismatch =
+                        (child.guardianEmail || '') !== normalizedTestEmail;
+
+                      return (
+                        <div
+                          key={child.id}
+                          className="bg-white rounded-[10px] border border-[#E6DFD3] overflow-hidden"
+                        >
+                          <div className="p-4 bg-[#FAF8F4] border-b border-[#E6DFD3] flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              {child.passportPhoto ? (
+                                <img
+                                  src={child.passportPhoto}
+                                  alt={child.fullName}
+                                  className="w-11 h-13 rounded-[8px] object-cover border border-[#DDD5C7]"
+                                />
+                              ) : (
+                                <div className="w-11 h-13 rounded-[8px] bg-[#6B1020] text-[#DFC484] flex items-center justify-center font-semibold text-sm">
+                                  {child.fullName.charAt(0)}
+                                </div>
+                              )}
+                              <div>
+                                <p className="font-semibold text-sm text-[#2A2A2E]">
+                                  {child.fullName}
+                                </p>
+                                <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#5E5B56] mt-0.5">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#FAF0F2] text-[#6B1020] border border-[#DFC7CA] font-medium">
+                                    <GraduationCap className="w-3 h-3" />
+                                    {child.className}
+                                  </span>
+                                  <span className="font-mono">{child.admissionNo}</span>
+                                </div>
+                                {hasCaseMismatch && (
+                                  <p className="text-[11px] text-[#7D5A18] mt-1">
+                                    Warning: stored Parent Email &ldquo;{child.guardianEmail}&rdquo; has uppercase/whitespace characters. Edit and re-save student to normalize it to &ldquo;{normalizedTestEmail}&rdquo;.
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
+                            <span className="text-[11px] font-medium px-2.5 py-1 rounded-[6px] bg-white border border-[#E6DFD3] text-[#2A2A2E]">
+                              {childSnaps.length} Published Report{childSnaps.length === 1 ? '' : 's'}
+                            </span>
+                          </div>
+
+                          <div className="p-4">
+                            {childSnaps.length === 0 ? (
+                              <p className="text-xs text-[#6E6A63] italic">
+                                No published report cards available for this child yet.
+                              </p>
+                            ) : (
+                              <div className="divide-y divide-[#EFE9DF] border border-[#E6DFD3] rounded-[8px]">
+                                {childSnaps.map((snap) => {
+                                  const clearance = computeStudentFeeClearance({
+                                    student: child,
+                                    session: snap.session,
+                                    term: snap.term,
+                                    studentFees,
+                                    feePayments,
+                                  });
+                                  const isWithheld =
+                                    schoolSettings.requireFullFeesBeforePublishReport === true &&
+                                    !clearance.cleared;
+
+                                  return (
+                                    <div
+                                      key={snap.id}
+                                      className="p-3 flex flex-wrap items-center justify-between gap-3 text-xs"
+                                    >
+                                      <div>
+                                        <p className="font-semibold text-[#2A2A2E]">
+                                          {snap.session} • {snap.term} ({snap.className})
+                                        </p>
+                                        <p className="text-[11px] text-[#5E5B56] mt-0.5">
+                                          Published: {formatShortPublishDate(snap.publishedAt)} • Avg:{' '}
+                                          <strong>{snap.averagePercentage}%</strong> • Grade:{' '}
+                                          <strong className="font-mono">{snap.overallGrade}</strong>
+                                          {snap.position
+                                            ? ` • Pos: ${formatOrdinal(snap.position)}/${snap.totalRankedStudents}`
+                                            : ''}
+                                        </p>
+                                        {isWithheld && (
+                                          <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded bg-[#FBF5E8] border border-[#E3CFA6] text-[#7D5A18] text-[10px] font-medium">
+                                            <Lock className="w-3 h-3" />
+                                            Withheld in Parent View (Outstanding Fees: ₦
+                                            {clearance.outstanding.toLocaleString('en-NG')})
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => setTestParentPreviewSnapshot(snap)}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] bg-[#6B1020] hover:bg-[#540C19] text-white text-[11px] font-medium"
+                                      >
+                                        <Eye className="w-3.5 h-3.5" />
+                                        Preview Read-Only Report
+                                      </button>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {orphanSnapshots.length > 0 && (
+                      <div className="bg-white rounded-[10px] border border-[#E3CFA6] p-4 space-y-2 text-xs">
+                        <p className="font-semibold text-[#7D5A18]">
+                          Published Snapshots Matched by Email (Student Record Not Matched):
+                        </p>
+                        {orphanSnapshots.map((snap) => (
+                          <div
+                            key={snap.id}
+                            className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-[8px] bg-[#FAF8F4] border border-[#E6DFD3]"
+                          >
+                            <span>
+                              <strong>{snap.studentName}</strong> ({snap.className}) — {snap.session} •{' '}
+                              {snap.term}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setTestParentPreviewSnapshot(snap)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[6px] bg-[#6B1020] text-white text-[11px] font-medium"
+                            >
+                              Preview Report
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="px-6 py-3 bg-[#FAF8F4] border-t border-[#E6DFD3] flex justify-end text-xs shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTestParentPreviewSnapshot(null);
+                    setIsTestAsParentModalOpen(false);
+                  }}
+                  className="px-4 py-2 rounded-[8px] bg-white hover:bg-[#FAF8F4] border border-[#DDD5C7] text-[#2A2A2E] font-medium"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

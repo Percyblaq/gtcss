@@ -36,6 +36,7 @@ export const INITIAL_SCHOOL_SETTINGS: SchoolSetting = {
   enableTeacherComment: true,
   enableHeadComment: true,
   enablePrincipalComment: true,
+  requireFullFeesBeforePublishReport: false,
   logoDataUrl: '',
   logoUpdatedAt: '',
   logoUpdatedBy: '',

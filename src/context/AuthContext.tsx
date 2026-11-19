@@ -301,7 +301,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isActive: true,
         inviteId,
         phone: phone ? phone.slice(0, 30) : undefined,
-        avatar: user.photoURL || undefined,
+        avatar:
+          user.photoURL && user.photoURL.length <= 500 ? user.photoURL : undefined,
         title: title.slice(0, 100),
         assignedClasses,
         assignedSubjects,
